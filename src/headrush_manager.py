@@ -250,6 +250,9 @@ def create_block_preset(slot_num, preset_name, tone=50, level=70):
     }
     with open(v1_dest, 'w', encoding='utf-8') as f:
         json.dump(v1_block, f, separators=(',', ':'))
+        f.flush()
+        try: os.fsync(f.fileno())
+        except Exception: pass
     paths_created.append(v1_dest)
     
     # 3. Generate for V2 (4-Instances Mod)
@@ -279,6 +282,9 @@ def create_block_preset(slot_num, preset_name, tone=50, level=70):
     }
     with open(v2_dest, 'w', encoding='utf-8') as f:
         json.dump(v2_block, f, separators=(',', ':'))
+        f.flush()
+        try: os.fsync(f.fileno())
+        except Exception: pass
     paths_created.append(v2_dest)
         
     return paths_created
