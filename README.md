@@ -1,5 +1,7 @@
 # 🎸 HeadRush NAM Studio Pro
 
+[![Tests & Linting](https://github.com/tiagojsoares/headrush-nam-studio/actions/workflows/test.yml/badge.svg)](https://github.com/tiagojsoares/headrush-nam-studio/actions/workflows/test.yml)
+[![Build & Release](https://github.com/tiagojsoares/headrush-nam-studio/actions/workflows/release.yml/badge.svg)](https://github.com/tiagojsoares/headrush-nam-studio/actions/workflows/release.yml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![UI Framework](https://img.shields.io/badge/UI-CustomTkinter-blueviolet.svg)](https://github.com/TomSchimansky/CustomTkinter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
