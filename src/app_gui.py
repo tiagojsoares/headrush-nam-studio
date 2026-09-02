@@ -733,7 +733,7 @@ class HeadRushApp(ctk.CTk):
             
             sql = '''
                 SELECT m.id, m.name, t.title, COALESCE(u.username, u.display_name, 'Community'),
-                       m.architecture_version, m.gear_type, m.local_path, t.description
+                       m.architecture_version, t.gear, m.local_path, t.description
                 FROM models_fts fts
                 JOIN models m ON fts.model_id = m.id
                 JOIN tones t ON m.tone_id = t.id
@@ -743,7 +743,7 @@ class HeadRushApp(ctk.CTk):
             params = [f'"{query}"*']
             
             if target_gear:
-                sql += ' AND m.gear_type = ?'
+                sql += ' AND t.gear = ?'
                 params.append(target_gear)
                 
             if arch_filter:
