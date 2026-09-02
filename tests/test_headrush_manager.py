@@ -19,7 +19,7 @@ def test_drive_and_path_getters(tmp_path):
     try:
         custom_drive = str(tmp_path)
         hm.set_drive(custom_drive)
-        assert hm.get_drive() == custom_drive
+        assert hm.get_drive().rstrip("/\\") == custom_drive.rstrip("/\\")
         assert hm.get_nam_dir() == os.path.join(custom_drive, "NAM")
         assert hm.get_blocks_v1_dir() == os.path.join(custom_drive, "Blocks", "ANXIETY OD")
         assert hm.get_blocks_v2_dir() == os.path.join(custom_drive, "Blocks", "ANXIETY OD V2")

@@ -9,11 +9,51 @@ from datetime import datetime
 HEADRUSH_DRIVE = "E:\\"
 
 def get_drive():
+    global HEADRUSH_DRIVE
+    if HEADRUSH_DRIVE and not HEADRUSH_DRIVE.endswith(("\\", "/")):
+        HEADRUSH_DRIVE = HEADRUSH_DRIVE + "\\"
     return HEADRUSH_DRIVE
 
 def set_drive(drive_letter):
     global HEADRUSH_DRIVE
+    if drive_letter:
+        drive_letter = drive_letter.strip().rstrip("/\\") + "\\"
     HEADRUSH_DRIVE = drive_letter
+
+def sync_missing_blocks():
+    """
+    Scans the /NAM directory for all .nam files and ensures that valid .block presets
+    exist in BOTH /Blocks/ANXIETY OD and /Blocks/ANXIETY OD V2.
+    Returns the count of generated/repaired blocks.
+    """
+    if not is_headrush_connected():
+        return 0
+    nam_dir = get_nam_dir()
+    if not os.path.exists(nam_dir):
+        return 0
+    generated_count = 0
+    for f in sorted(os.listdir(nam_dir)):
+        if f.lower().endswith('.nam'):
+            m = re.match(r'^(\d{3})\s*-\s*(.*)\.nam$', f, re.IGNORECASE)
+            if m:
+                s_num = int(m.group(1))
+                s_name = m.group(2)
+                b1_dir = get_blocks_v1_dir()
+                b2_dir = get_blocks_v2_dir()
+                
+                # Check if block exists in either folder
+                b1_exists = False
+                b2_exists = False
+                if os.path.exists(b1_dir):
+                    b1_exists = any(bf.startswith(f"{s_num:03d} -") and bf.lower().endswith('.block') for bf in os.listdir(b1_dir))
+                if os.path.exists(b2_dir):
+                    b2_exists = any(bf.startswith(f"{s_num:03d} -") and bf.lower().endswith('.block') for bf in os.listdir(b2_dir))
+                    
+                if not b1_exists or not b2_exists:
+                    create_block_preset(s_num, s_name)
+                    generated_count += 1
+    return generated_count
+
 
 def get_nam_dir():
     return os.path.join(get_drive(), "NAM")

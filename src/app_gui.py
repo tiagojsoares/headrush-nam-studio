@@ -119,6 +119,9 @@ class HeadRushBackend:
     def create_ir_block(self, preset_name, ir_folder, ir_name, gain=-10.0, hi_cut=10000, lo_cut=50):
         return hm.create_ir_block_preset(preset_name, ir_folder, ir_name, gain=gain, hi_cut=hi_cut, lo_cut=lo_cut)
 
+    def sync_missing_blocks(self):
+        return hm.sync_missing_blocks()
+
     def backup(self):
         return hm.create_backup()
 
@@ -268,14 +271,38 @@ class HeadRushApp(ctk.CTk):
         self.ent_filter_installed = ctk.CTkEntry(
             top_bar,
             placeholder_text="Filtrar por nome ou número...",
-            width=260
+            width=220
         )
-        self.ent_filter_installed.pack(side="right", padx=16, pady=10)
+        self.ent_filter_installed.pack(side="right", padx=(6, 16), pady=10)
         self.ent_filter_installed.bind("<KeyRelease>", lambda e: self.filter_installed_slots())
+        
+        btn_sync = ctk.CTkButton(
+            top_bar,
+            text="🛠️ Sincronizar Blocos",
+            width=150,
+            height=30,
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self.trigger_sync_blocks
+        )
+        btn_sync.pack(side="right", padx=6, pady=10)
         
         # Scrollable container for slots
         self.slots_scroll = ctk.CTkScrollableFrame(self.tab_installed, fg_color="transparent")
         self.slots_scroll.pack(fill="both", expand=True, padx=6, pady=6)
+
+    def trigger_sync_blocks(self):
+        if not self.backend.is_connected():
+            messagebox.showerror("Erro", "Pedaleira não detectada.")
+            return
+        count = self.backend.sync_missing_blocks()
+        self.refresh_installed_slots()
+        messagebox.showinfo(
+            "Sincronização de Blocos",
+            f"Varredura concluída!\n\n"
+            f"• {count} blocos de presets foram gerados/reparados para arquivos .nam que estavam sem preset."
+        )
 
     def refresh_installed_slots(self):
         for widget in self.slots_scroll.winfo_children():
