@@ -536,3 +536,118 @@ def restore_backup(backup_dir):
             shutil.copy2(os.path.join(src_b2, f), os.path.join(dest_b2, f))
             
     return True
+
+def clean_orphaned_blocks():
+    """
+    Deletes any numbered .block preset in /Blocks/ANXIETY OD and /Blocks/ANXIETY OD V2
+    that does not have a corresponding .nam model file in /NAM.
+    Preserves default factory presets (+DEFAULT.block, etc.).
+    """
+    if not is_headrush_connected():
+        return []
+    slots = get_installed_slots()
+    valid_slots = set(s for s, info in slots.items() if info.get('nam_file'))
+    
+    deleted = []
+    for b_dir in [get_blocks_v1_dir(), get_blocks_v2_dir()]:
+        if os.path.exists(b_dir):
+            for f in os.listdir(b_dir):
+                if f.lower().endswith('.block'):
+                    m = re.match(r'^(\d{3})\s*-\s*(.*)\.block$', f, re.IGNORECASE)
+                    if m:
+                        slot_num = int(m.group(1))
+                        if slot_num not in valid_slots:
+                            try:
+                                os.remove(os.path.join(b_dir, f))
+                                deleted.append(f)
+                            except Exception:
+                                pass
+    return deleted
+
+def defrag_and_reorder_slots(sort_by="current", make_safety_backup=True):
+    """
+    Reorganizes all installed NAM models into sequential slots (000 to N-1).
+    - sort_by: 'current' (preserves order, compacts gaps) or 'alpha' (alphabetical sort).
+    - make_safety_backup: Automatically creates a full backup before modifying files.
+    """
+    if not is_headrush_connected():
+        raise Exception("HeadRush MX5 não está conectada.")
+        
+    slots = get_installed_slots()
+    active_models = [info for s, info in slots.items() if info.get('nam_file')]
+    
+    if not active_models:
+        return {"count": 0, "backup": None, "mode": sort_by}
+        
+    # 1. Safety Backup
+    backup_path = None
+    if make_safety_backup:
+        backup_path = create_backup()
+        
+    # 2. Sort active models
+    if sort_by == "alpha":
+        active_models.sort(key=lambda x: sanitize_for_headrush(x.get('nam_name') or x.get('preset_name') or '').lower())
+    else:
+        active_models.sort(key=lambda x: x['slot'])
+        
+    nam_dir = get_nam_dir()
+    
+    # 3. Stage models into temporary folder
+    import tempfile
+    temp_stage = tempfile.mkdtemp(prefix="headrush_organize_")
+    
+    try:
+        staged_items = []
+        for new_idx, info in enumerate(active_models):
+            old_nam_path = os.path.join(nam_dir, info['nam_file'])
+            if not os.path.exists(old_nam_path):
+                continue
+                
+            clean_name = sanitize_for_headrush(info.get('nam_name') or info.get('preset_name') or f"MODEL {new_idx:03d}", 24)
+            clean_file_name = re.sub(r'[\\/*?:"<>|]', '_', clean_name)
+            new_nam_filename = f"{new_idx:03d} - {clean_file_name}.nam"
+            staged_nam_path = os.path.join(temp_stage, new_nam_filename)
+            
+            shutil.copy2(old_nam_path, staged_nam_path)
+            
+            staged_items.append({
+                "new_slot": new_idx,
+                "preset_name": clean_name,
+                "tone": info.get('tone', 50),
+                "level": info.get('level', 70),
+                "staged_path": staged_nam_path,
+                "filename": new_nam_filename
+            })
+            
+        # 4. Clear existing /NAM directory of .nam files
+        for f in os.listdir(nam_dir):
+            if f.lower().endswith('.nam'):
+                try:
+                    os.remove(os.path.join(nam_dir, f))
+                except Exception:
+                    pass
+                    
+        # 5. Clear all existing numbered .block files in V1 and V2
+        for b_dir in [get_blocks_v1_dir(), get_blocks_v2_dir()]:
+            if os.path.exists(b_dir):
+                for f in os.listdir(b_dir):
+                    if f.lower().endswith('.block') and f[:3].isdigit():
+                        try:
+                            os.remove(os.path.join(b_dir, f))
+                        except Exception:
+                            pass
+                            
+        # 6. Copy back all renumbered .nam files & generate fresh .blocks
+        for item in staged_items:
+            dest_nam = os.path.join(nam_dir, item['filename'])
+            shutil.copy2(item['staged_path'], dest_nam)
+            create_block_preset(item['new_slot'], item['preset_name'], tone=item['tone'], level=item['level'])
+            
+        return {
+            "count": len(staged_items),
+            "backup": backup_path,
+            "mode": sort_by
+        }
+    finally:
+        shutil.rmtree(temp_stage, ignore_errors=True)
+

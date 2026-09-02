@@ -173,3 +173,46 @@ def test_backup_and_restore(tmp_path):
     finally:
         hm.set_drive(orig_drive)
 
+def test_clean_orphaned_blocks_and_defrag(tmp_path):
+    orig_drive = hm.get_drive()
+    try:
+        mock_drive = tmp_path / "headrush_drive"
+        os.makedirs(mock_drive / "NAM", exist_ok=True)
+        os.makedirs(mock_drive / "Blocks" / "ANXIETY OD", exist_ok=True)
+        os.makedirs(mock_drive / "Blocks" / "ANXIETY OD V2", exist_ok=True)
+        hm.set_drive(str(mock_drive))
+        
+        # Create models at slot 5 and slot 15
+        src_a = tmp_path / "a.nam"
+        src_a.write_text("A", encoding='utf-8')
+        src_b = tmp_path / "b.nam"
+        src_b.write_text("B", encoding='utf-8')
+        
+        hm.install_nam_to_headrush(str(src_a), custom_name="Zebra Amp", slot=5)
+        hm.install_nam_to_headrush(str(src_b), custom_name="Alpha Amp", slot=15)
+        
+        # Create an orphaned block for slot 99 (no matching .nam file)
+        hm.create_block_preset(99, "Orphaned Tone")
+        assert any("099" in f for f in os.listdir(hm.get_blocks_v2_dir()))
+        
+        # Test clean_orphaned_blocks
+        deleted = hm.clean_orphaned_blocks()
+        assert len(deleted) > 0
+        assert not any("099" in f for f in os.listdir(hm.get_blocks_v2_dir()))
+        
+        # Test defrag_and_reorder_slots (alphabetical)
+        res = hm.defrag_and_reorder_slots(sort_by="alpha", make_safety_backup=False)
+        assert res["count"] == 2
+        
+        slots = hm.get_installed_slots()
+        assert 0 in slots
+        assert 1 in slots
+        assert 5 not in slots
+        assert 15 not in slots
+        # Alpha Amp should be slot 000, Zebra Amp slot 001
+        assert slots[0]["preset_name"] == "Alpha Amp"
+        assert slots[1]["preset_name"] == "Zebra Amp"
+    finally:
+        hm.set_drive(orig_drive)
+
+

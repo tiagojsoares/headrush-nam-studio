@@ -122,6 +122,12 @@ class HeadRushBackend:
     def sync_missing_blocks(self):
         return hm.sync_missing_blocks()
 
+    def clean_orphaned_blocks(self):
+        return hm.clean_orphaned_blocks()
+
+    def defrag_and_reorder_slots(self, sort_by="current", make_safety_backup=True):
+        return hm.defrag_and_reorder_slots(sort_by=sort_by, make_safety_backup=make_safety_backup)
+
     def backup(self):
         return hm.create_backup()
 
@@ -276,6 +282,18 @@ class HeadRushApp(ctk.CTk):
         self.ent_filter_installed.pack(side="right", padx=(6, 16), pady=10)
         self.ent_filter_installed.bind("<KeyRelease>", lambda e: self.filter_installed_slots())
         
+        btn_organize = ctk.CTkButton(
+            top_bar,
+            text="🧙 Organizar Timbres",
+            width=150,
+            height=30,
+            fg_color="#7c3aed",
+            hover_color="#6d28d9",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self.open_organize_dialog
+        )
+        btn_organize.pack(side="right", padx=6, pady=10)
+
         btn_sync = ctk.CTkButton(
             top_bar,
             text="🛠️ Sincronizar Blocos",
@@ -303,6 +321,130 @@ class HeadRushApp(ctk.CTk):
             f"Varredura concluída!\n\n"
             f"• {count} blocos de presets foram gerados/reparados para arquivos .nam que estavam sem preset."
         )
+
+    def open_organize_dialog(self):
+        if not self.backend.is_connected():
+            messagebox.showerror("Erro", "Pedaleira não conectada via USB.")
+            return
+            
+        slots = self.backend.get_installed_slots()
+        occupied = [info for s, info in slots.items() if info.get('nam_file')]
+        
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("🧙 Assistente de Organização · HeadRush NAM Studio")
+        dialog.geometry("520x460")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        ctk.CTkLabel(
+            dialog,
+            text="🧙 Assistente de Organização da Pedaleira",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#a855f7"
+        ).pack(pady=(16, 4))
+        
+        ctk.CTkLabel(
+            dialog,
+            text=f"Total de timbres ativos na HeadRush: {len(occupied)} modelos instalados.",
+            font=ctk.CTkFont(size=12),
+            text_color="#a1a1aa"
+        ).pack(pady=(0, 12))
+        
+        # Options Frame
+        opts_frame = ctk.CTkFrame(dialog, fg_color="#18181b", corner_radius=8)
+        opts_frame.pack(fill="x", padx=25, pady=8)
+        
+        mode_var = ctk.StringVar(value="current")
+        
+        r1 = ctk.CTkRadioButton(
+            opts_frame,
+            text="📦 Compactar Slots (Remover Espaços Vazios)\nRenumera todos os timbres de 000 em diante sem deixar buracos.",
+            variable=mode_var,
+            value="current",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#ffffff"
+        )
+        r1.pack(anchor="w", padx=16, pady=12)
+        
+        r2 = ctk.CTkRadioButton(
+            opts_frame,
+            text="🔤 Ordenar Alfabeticamente (A ➔ Z)\nOrganiza todos os timbres em ordem alfabética (000 a N-1).",
+            variable=mode_var,
+            value="alpha",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#ffffff"
+        )
+        r2.pack(anchor="w", padx=16, pady=12)
+        
+        chk_backup = ctk.CTkCheckBox(
+            dialog,
+            text="Criar Backup Automático de Segurança antes de organizar",
+            font=ctk.CTkFont(size=12),
+            text_color="#e4e4e7"
+        )
+        chk_backup.select()
+        chk_backup.pack(anchor="w", padx=28, pady=8)
+        
+        # Clean orphans button
+        def do_clean_orphans():
+            deleted = self.backend.clean_orphaned_blocks()
+            self.refresh_installed_slots()
+            messagebox.showinfo(
+                "Limpeza de Presets Órfãos",
+                f"Varredura de limpeza concluída!\n\n"
+                f"• {len(deleted)} blocos órfãos (sem arquivo .nam correspondente) foram removidos."
+            )
+            
+        btn_clean = ctk.CTkButton(
+            dialog,
+            text="🧹 Limpar Presets Órfãos (Blocos sem arquivo .nam)",
+            fg_color="#27272a",
+            hover_color="#3f3f46",
+            height=30,
+            command=do_clean_orphans
+        )
+        btn_clean.pack(fill="x", padx=25, pady=4)
+        
+        def run_organize():
+            mode = mode_var.get()
+            make_bk = bool(chk_backup.get())
+            
+            mode_desc = "Compactação de Slots (000 a N-1)" if mode == "current" else "Ordenação Alfabética (A-Z)"
+            ans = messagebox.askyesno(
+                "Confirmar Reorganização",
+                f"Você escolheu: {mode_desc}\n\n"
+                f"Todos os seus {len(occupied)} timbres serão reindexados e organizados sequencialmente a partir do Slot 000.\n"
+                f"Deseja prosseguir?"
+            )
+            if not ans:
+                return
+                
+            try:
+                res = self.backend.defrag_and_reorder_slots(sort_by=mode, make_safety_backup=make_bk)
+                dialog.destroy()
+                self.refresh_all()
+                
+                msg = f"Reorganização concluída com sucesso! 🚀\n\n" \
+                      f"• {res['count']} timbres organizados sequencialmente (Slots 000 a {res['count']-1:03d}).\n"
+                if res.get('backup'):
+                    msg += f"• Backup de segurança salvo em: {res['backup']}\n\n"
+                msg += "⚠️ LEMBRE-SE: Reinicie sua HeadRush MX5 para que ela reconheça a nova ordem dos slots!"
+                
+                messagebox.showinfo("Sucesso!", msg)
+            except Exception as e:
+                messagebox.showerror("Erro ao Organizar", str(e))
+                
+        btn_start = ctk.CTkButton(
+            dialog,
+            text="🚀 Iniciar Reorganização",
+            fg_color="#7c3aed",
+            hover_color="#6d28d9",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            height=38,
+            command=run_organize
+        )
+        btn_start.pack(fill="x", padx=25, pady=(12, 10))
 
     def refresh_installed_slots(self):
         for widget in self.slots_scroll.winfo_children():
