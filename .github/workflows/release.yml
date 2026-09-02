@@ -41,7 +41,7 @@ jobs:
 
       - name: Build Standalone Windows Executable (.exe)
         run: |
-          pyinstaller --noconsole --onefile --name "HeadRush_NAM_Studio" --collect-all customtkinter --distpath dist main.py --clean -y
+          pyinstaller --noconsole --onefile --name "HeadRush_NAM_Studio" --paths src --hidden-import app_gui --hidden-import headrush_manager --hidden-import headrush_cli --collect-all customtkinter --distpath dist main.py --clean -y
 
       - name: Create ZIP Package
         run: |

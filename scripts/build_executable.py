@@ -9,6 +9,7 @@ import os
 def build():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     main_script = os.path.join(root_dir, "main.py")
+    src_dir = os.path.join(root_dir, "src")
     dist_dir = os.path.join(root_dir, "dist")
     
     cmd = [
@@ -17,6 +18,10 @@ def build():
         "--noconsole",
         "--onefile",
         "--name", "HeadRush_NAM_Studio",
+        "--paths", src_dir,
+        "--hidden-import", "app_gui",
+        "--hidden-import", "headrush_manager",
+        "--hidden-import", "headrush_cli",
         "--collect-all", "customtkinter",
         "--distpath", dist_dir,
         main_script,

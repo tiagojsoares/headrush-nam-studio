@@ -12,7 +12,7 @@ echo Installing dependencies...
 pip install -r requirements.txt
 
 echo Building single-file executable with PyInstaller...
-pyinstaller --noconsole --onefile --name "HeadRush_NAM_Studio" --collect-all customtkinter --distpath dist main.py --clean -y
+pyinstaller --noconsole --onefile --name "HeadRush_NAM_Studio" --paths src --hidden-import app_gui --hidden-import headrush_manager --hidden-import headrush_cli --collect-all customtkinter --distpath dist main.py --clean -y
 
 echo.
 echo =======================================================
