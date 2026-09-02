@@ -118,10 +118,58 @@ def test_slot_management_and_installation(tmp_path):
         assert slots[0]["nam_name"] == "DUMBLE ODS"
         assert hm.get_next_free_slot() == 1
         
-        # Delete slot 0
-        del_success = hm.delete_slot(0)
+        # Test update_slot_trims
+        hm.update_slot_trims(0, "DUMBLE CLEAN", tone=40, level=85, sync_nam_name=True)
+        slots = hm.get_installed_slots()
+        assert slots[0]["preset_name"] == "DUMBLE CLEAN"
+        assert slots[0]["tone"] == 40
+        assert slots[0]["level"] == 85
+        assert "DUMBLE CLEAN" in slots[0]["nam_file"]
+        
+        # Test move_slot (0 -> 10)
+        hm.move_slot(0, 10)
+        slots = hm.get_installed_slots()
+        assert 0 not in slots
+        assert 10 in slots
+        assert slots[10]["preset_name"] == "DUMBLE CLEAN"
+        assert slots[10]["tone"] == 40
+        
+        # Delete slot 10
+        del_success = hm.delete_slot(10)
         assert del_success is True
-        assert not os.path.exists(res["nam_path"])
-        assert hm.get_next_free_slot() == 0
+        assert 10 not in hm.get_installed_slots()
     finally:
         hm.set_drive(orig_drive)
+
+def test_backup_and_restore(tmp_path):
+    orig_drive = hm.get_drive()
+    try:
+        mock_drive = tmp_path / "headrush_drive"
+        os.makedirs(mock_drive / "Blocks", exist_ok=True)
+        hm.set_drive(str(mock_drive))
+        
+        # Install a model
+        src_nam = tmp_path / "src.nam"
+        src_nam.write_text("TEST", encoding='utf-8')
+        hm.install_nam_to_headrush(str(src_nam), custom_name="PRE_BACKUP", slot=1)
+        
+        # Create backup
+        backup_storage = tmp_path / "backups"
+        bdir = hm.create_backup(target_root=str(backup_storage))
+        assert os.path.exists(bdir)
+        
+        backups = hm.list_backups(target_root=str(backup_storage))
+        assert len(backups) == 1
+        
+        # Modify slot 1
+        hm.delete_slot(1)
+        assert 1 not in hm.get_installed_slots()
+        
+        # Restore backup
+        hm.restore_backup(bdir)
+        slots = hm.get_installed_slots()
+        assert 1 in slots
+        assert slots[1]["preset_name"] == "PRE_BACKUP"
+    finally:
+        hm.set_drive(orig_drive)
+

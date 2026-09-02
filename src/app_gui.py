@@ -17,6 +17,14 @@ except ImportError:
     print("CustomTkinter or Tkinter not installed.")
     sys.exit(1)
 
+# Import headrush_manager
+try:
+    import headrush_manager as hm
+except ImportError:
+    # Handle if running from different working directory
+    sys.path.insert(0, os.path.dirname(__file__))
+    import headrush_manager as hm
+
 # App Configuration
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -37,332 +45,96 @@ def get_available_drives():
 def detect_headrush_drive():
     """Auto-detect which drive letter is the HeadRush MX5."""
     # Check E: first
-    if os.path.exists("E:/NAM") and os.path.exists("E:/Blocks"):
+    if os.path.exists("E:/NAM") or os.path.exists("E:/Blocks"):
         return "E:"
     # Check all other mounted drives
     for d in get_available_drives():
-        if os.path.exists(os.path.join(d, "NAM")) and os.path.exists(os.path.join(d, "Blocks")):
+        if os.path.exists(os.path.join(d, "NAM")) or os.path.exists(os.path.join(d, "Blocks")):
             return d
     return None
 
 class HeadRushBackend:
+    """Backend wrapper delegating directly to the robust headrush_manager library."""
     def __init__(self, drive="E:"):
-        self.drive = drive
+        self.set_drive(drive)
         
     def set_drive(self, drive):
         self.drive = drive
+        hm.set_drive(drive)
         
     @property
     def nam_dir(self):
-        return os.path.join(self.drive, "NAM")
+        return hm.get_nam_dir()
         
     @property
     def blocks_v1_dir(self):
-        return os.path.join(self.drive, "Blocks", "ANXIETY OD")
+        return hm.get_blocks_v1_dir()
         
     @property
     def blocks_v2_dir(self):
-        return os.path.join(self.drive, "Blocks", "ANXIETY OD V2")
+        return hm.get_blocks_v2_dir()
         
     @property
     def ir_dir(self):
-        return os.path.join(self.drive, "Impulse Responses")
+        return hm.get_ir_dir()
         
     @property
     def ir_blocks_dir(self):
-        return os.path.join(self.drive, "Blocks", "IR")
+        return hm.get_ir_blocks_dir()
         
     def is_connected(self):
-        if not self.drive:
-            return False
-        # Consider connected if the drive exists and contains any known HeadRush folder
-        return os.path.exists(self.drive) and (
-            os.path.exists(os.path.join(self.drive, "Blocks")) or 
-            os.path.exists(os.path.join(self.drive, "Rigs")) or 
-            os.path.exists(os.path.join(self.drive, "NAM"))
-        )
+        return hm.is_headrush_connected()
         
     def get_free_space_gb(self):
-        if not self.is_connected():
-            return 0.0
-        try:
-            total, used, free = shutil.disk_usage(self.drive)
-            return free / (1024 ** 3)
-        except:
-            return 0.0
+        return hm.get_free_space_gb()
 
     def get_installed_slots(self):
-        if not self.is_connected():
-            return {}
-            
-        slots = {}
-        # 1. Scan NAM files
-        if os.path.exists(self.nam_dir):
-            try:
-                for f in os.listdir(self.nam_dir):
-                    if f.lower().endswith('.nam'):
-                        m = re.match(r'^(\d{3})\s*-\s*(.*)\.nam$', f, re.IGNORECASE)
-                        if m:
-                            slot_num = int(m.group(1))
-                            slots[slot_num] = {
-                                'slot': slot_num,
-                                'slot_str': f"{slot_num:03d}",
-                                'nam_file': f,
-                                'nam_name': m.group(2),
-                                'block_file_v1': None,
-                                'block_file_v2': None,
-                                'preset_name': None,
-                                'tone': 50,
-                                'level': 70
-                            }
-            except:
-                pass
-                
-        # Helper to read blocks
-        def read_blocks(b_dir, v_key):
-            if not os.path.exists(b_dir): return
-            try:
-                for f in os.listdir(b_dir):
-                    if f.lower().endswith('.block'):
-                        m = re.match(r'^(\d{3})\s*-\s*(.*)\.block$', f, re.IGNORECASE)
-                        if m:
-                            slot_num = int(m.group(1))
-                            if slot_num not in slots:
-                                slots[slot_num] = {
-                                    'slot': slot_num, 'slot_str': f"{slot_num:03d}",
-                                    'nam_file': None, 'nam_name': None,
-                                    'block_file_v1': None, 'block_file_v2': None,
-                                    'preset_name': m.group(2), 'tone': 50, 'level': 70
-                                }
-                            slots[slot_num][v_key] = f
-                            if not slots[slot_num]['preset_name']:
-                                slots[slot_num]['preset_name'] = m.group(2)
-                                
-                            try:
-                                with open(os.path.join(b_dir, f), 'r', encoding='utf-8') as bfp:
-                                    d = json.load(bfp)
-                                    content = json.loads(d['content'])
-                                    pedal_type = 'Anxiety OD' if v_key == 'block_file_v1' else 'Anxiety OD V2'
-                                    pedal = content['data'][pedal_type]['children']
-                                    slots[slot_num]['drive'] = pedal['Drive']['value']
-                                    slots[slot_num]['tone'] = pedal['Tone']['value']
-                                    slots[slot_num]['level'] = pedal['Level']['value']
-                            except:
-                                pass
-            except:
-                pass
-
-        read_blocks(self.blocks_v1_dir, 'block_file_v1')
-        read_blocks(self.blocks_v2_dir, 'block_file_v2')
-        return slots
+        return hm.get_installed_slots()
 
     def get_next_free_slot(self):
-        slots = self.get_installed_slots()
-        for s in range(101):
-            if s not in slots or not slots[s]['nam_file']:
-                return s
-        return None
+        return hm.get_next_free_slot()
 
     def sanitize_preset_name(self, text, max_len=26):
-        clean = re.sub(r'[^\w\s\-\+\.]', '', text)
-        clean = re.sub(r'\s+', ' ', clean).strip()
-        return clean[:max_len].strip()
+        return hm.sanitize_for_headrush(text, max_len)
 
     def create_block_preset(self, slot_num, preset_name, tone=50, level=70):
-        # Create BOTH V1 and V2 blocks so the user's mod works no matter what
-        filename = f"{slot_num:03d} - {preset_name}.block"
-        
-        # V1
-        os.makedirs(self.blocks_v1_dir, exist_ok=True)
-        path_v1 = os.path.join(self.blocks_v1_dir, filename)
-        inner_v1 = {
-            "data": {
-                "Anxiety OD": {
-                    "childorder": ["Level", "Drive", "Tone", "Hi-Lo"],
-                    "children": {
-                        "Drive": {"type": 0, "value": int(slot_num)},
-                        "Hi-Lo": {"state": False, "type": 1},
-                        "Level": {"type": 0, "value": int(level)},
-                        "Tone": {"type": 0, "value": int(tone)}
-                    }
-                }
-            },
-            "info": {"version": "1.0.9"}
-        }
-        obj_v1 = {
-            "content": json.dumps(inner_v1, separators=(',', ':')),
-            "id": str(uuid.uuid4()),
-            "readonly": False,
-            "type": "ANXIETY OD"
-        }
-        with open(path_v1, 'w', encoding='utf-8') as f:
-            json.dump(obj_v1, f, separators=(',', ':'))
-            
-        # V2
-        os.makedirs(self.blocks_v2_dir, exist_ok=True)
-        path_v2 = os.path.join(self.blocks_v2_dir, filename)
-        inner_v2 = {
-            "data": {
-                "Anxiety OD V2": {
-                    "childorder": ["Level", "Drive", "Tone", "Hi-Lo"],
-                    "children": {
-                        "Drive": {"type": 0, "value": int(slot_num)},
-                        "Hi-Lo": {"state": False, "type": 1},
-                        "Level": {"type": 0, "value": int(level)},
-                        "Tone": {"type": 0, "value": int(tone)}
-                    }
-                }
-            },
-            "info": {"version": "1.0.9"}
-        }
-        obj_v2 = {
-            "content": json.dumps(inner_v2, separators=(',', ':')),
-            "id": str(uuid.uuid4()),
-            "readonly": False,
-            "type": "ANXIETY OD V2"
-        }
-        with open(path_v2, 'w', encoding='utf-8') as f:
-            json.dump(obj_v2, f, separators=(',', ':'))
-            
-        return path_v1
+        paths = hm.create_block_preset(slot_num, preset_name, tone=tone, level=level)
+        return paths[0] if paths else None
 
     def install_model(self, src_path, preset_name=None, slot=None, tone=50, level=70):
-        if not self.is_connected():
-            raise Exception("HeadRush MX5 não está conectada na unidade atual.")
-            
-        if slot is None:
-            slot = self.get_next_free_slot()
-            if slot is None:
-                raise Exception("Limite atingido! Todos os 101 slots estão ocupados.")
-                
-        base_name = preset_name or os.path.splitext(os.path.basename(src_path))[0]
-        base_name = re.sub(r'^\d{3}\s*-\s*', '', base_name)
-        
-        # 1. Copy NAM
-        os.makedirs(self.nam_dir, exist_ok=True)
-        clean_nam = re.sub(r'[\/*?:"<>|]', '_', base_name)
-        nam_filename = f"{slot:03d} - {clean_nam}.nam"
-        dest_nam = os.path.join(self.nam_dir, nam_filename)
-        shutil.copy2(src_path, dest_nam)
-        
-        # 2. Create Block Presets
-        short_name = self.sanitize_preset_name(base_name, 24)
-        dest_block = self.create_block_preset(slot, short_name, tone=tone, level=level)
-        
-        return {
-            "slot": slot,
-            "nam_file": nam_filename,
-            "preset_name": short_name,
-            "block_path": dest_block
-        }
+        return hm.install_nam_to_headrush(src_path, custom_name=preset_name, slot=slot, tone=tone, level=level)
 
     def delete_slot(self, slot_num):
-        slots = self.get_installed_slots()
-        if slot_num in slots:
-            info = slots[slot_num]
-            if info['nam_file']:
-                npath = os.path.join(self.nam_dir, info['nam_file'])
-                if os.path.exists(npath):
-                    os.remove(npath)
-            if info.get('block_file_v1'):
-                bpath = os.path.join(self.blocks_v1_dir, info['block_file_v1'])
-                if os.path.exists(bpath):
-                    os.remove(bpath)
-            if info.get('block_file_v2'):
-                bpath = os.path.join(self.blocks_v2_dir, info['block_file_v2'])
-                if os.path.exists(bpath):
-                    os.remove(bpath)
-            return True
-        return False
+        return hm.delete_slot(slot_num)
 
-    def update_slot_trims(self, slot_num, preset_name, tone, level):
-        slots = self.get_installed_slots()
-        if slot_num in slots:
-            info = slots[slot_num]
-            new_preset_name = self.sanitize_preset_name(preset_name, 24)
-            # Delete old blocks
-            if info.get('block_file_v1'):
-                old_path = os.path.join(self.blocks_v1_dir, info['block_file_v1'])
-                if os.path.exists(old_path): os.remove(old_path)
-            if info.get('block_file_v2'):
-                old_path = os.path.join(self.blocks_v2_dir, info['block_file_v2'])
-                if os.path.exists(old_path): os.remove(old_path)
-            # Recreate both blocks
-            self.create_block_preset(slot_num, new_preset_name, tone=tone, level=level)
-            return True
-        return False
+    def update_slot_trims(self, slot_num, preset_name, tone, level, sync_nam=True):
+        return hm.update_slot_trims(slot_num, preset_name, tone=tone, level=level, sync_nam_name=sync_nam)
+
+    def move_slot(self, old_slot, new_slot):
+        return hm.move_slot(old_slot, new_slot)
 
     def get_irs(self):
-        if not os.path.exists(self.ir_dir):
-            return []
-        irs = []
-        for root, dirs, files in os.walk(self.ir_dir):
-            for f in files:
-                if f.lower().endswith(('.wav', '.aif', '.aiff')):
-                    rel = os.path.relpath(root, self.ir_dir)
-                    folder = "[USER]" if rel == '.' else rel.split(os.sep)[0]
-                    name_no_ext = os.path.splitext(f)[0]
-                    irs.append({
-                        "folder": folder,
-                        "filename": f,
-                        "name": name_no_ext,
-                        "path": os.path.join(root, f)
-                    })
-        return irs
+        return hm.get_available_irs()
 
     def create_ir_block(self, preset_name, ir_folder, ir_name, gain=-10.0, hi_cut=10000, lo_cut=50):
-        os.makedirs(self.ir_blocks_dir, exist_ok=True)
-        filename = f"{self.sanitize_preset_name(preset_name, 24)}.block"
-        path = os.path.join(self.ir_blocks_dir, filename)
-        
-        ir_str = f"[directory]({ir_folder})[name]({ir_name})"
-        inner = {
-            "data": {
-                "IR": {
-                    "childorder": ["DoubleStates", "IR", "Gain", "HiCut", "LoCut", "Mix"],
-                    "children": {
-                        "DoubleStates": {"state": False, "type": 3},
-                        "Gain": {"type": 0, "value": float(gain)},
-                        "HiCut": {"type": 0, "value": int(hi_cut)},
-                        "IR": {"string": ir_str, "type": 8},
-                        "LoCut": {"type": 0, "value": int(lo_cut)},
-                        "Mix": {"type": 0, "value": 100}
-                    }
-                }
-            },
-            "info": {"version": "1.0.9"}
-        }
-        obj = {
-            "content": json.dumps(inner, separators=(',', ':')),
-            "id": str(uuid.uuid4()),
-            "readonly": False,
-            "type": "IR"
-        }
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(obj, f, separators=(',', ':'))
-        return path
+        return hm.create_ir_block_preset(preset_name, ir_folder, ir_name, gain=gain, hi_cut=hi_cut, lo_cut=lo_cut)
 
     def backup(self):
-        if not self.is_connected():
-            raise Exception("Pedaleira não conectada.")
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_dir = f"c:/VM/HeadRush_Backup_{ts}"
-        os.makedirs(backup_dir, exist_ok=True)
-        if os.path.exists(self.nam_dir):
-            shutil.copytree(self.nam_dir, os.path.join(backup_dir, "NAM"))
-        if os.path.exists(self.blocks_v1_dir):
-            shutil.copytree(self.blocks_v1_dir, os.path.join(backup_dir, "Blocks_ANXIETY_OD"))
-        if os.path.exists(self.blocks_v2_dir):
-            shutil.copytree(self.blocks_v2_dir, os.path.join(backup_dir, "Blocks_ANXIETY_OD_V2"))
-        return backup_dir
+        return hm.create_backup()
+
+    def list_backups(self):
+        return hm.list_backups()
+
+    def restore_backup(self, backup_dir):
+        return hm.restore_backup(backup_dir)
 
 class HeadRushApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         
         self.title("HeadRush MX5 · NAM Studio Pro")
-        self.geometry("1100x720")
-        self.minsize(950, 600)
+        self.geometry("1140x760")
+        self.minsize(980, 640)
         
         # Detect drive
         detected_drive = detect_headrush_drive() or "E:"
@@ -372,50 +144,54 @@ class HeadRushApp(ctk.CTk):
         self.build_header()
         self.build_tabs()
         
-        # Start initial load
+        # Initial refresh
         self.refresh_connection()
         self.refresh_installed_slots()
 
     def build_header(self):
-        self.header_frame = ctk.CTkFrame(self, height=75, corner_radius=0, fg_color="#18181b")
-        self.header_frame.pack(fill="x", side="top")
+        header = ctk.CTkFrame(self, height=65, corner_radius=0, fg_color="#18181b")
+        header.pack(fill="x", side="top")
         
         # Logo & Title
-        title_box = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        title_box = ctk.CTkFrame(header, fg_color="transparent")
         title_box.pack(side="left", padx=20, pady=12)
         
-        title_label = ctk.CTkLabel(
+        lbl_title = ctk.CTkLabel(
             title_box, 
-            text="HEADRUSH MX5 · NAM STUDIO", 
-            font=ctk.CTkFont(size=20, weight="bold"),
+            text="⚡ HEADRUSH NAM STUDIO PRO", 
+            font=ctk.CTkFont(size=18, weight="bold"),
             text_color="#f4f4f5"
         )
-        title_label.pack(anchor="w")
+        lbl_title.pack(side="left")
         
-        sub_label = ctk.CTkLabel(
-            title_box, 
-            text="Gerenciador Inteligente de Timbres NAM, Presets e IRs · 97k Library", 
-            font=ctk.CTkFont(size=12),
-            text_color="#a1a1aa"
+        lbl_badge = ctk.CTkLabel(
+            title_box,
+            text="v1.1.0",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#27272a",
+            text_color="#a1a1aa",
+            corner_radius=6,
+            width=50,
+            height=20
         )
-        sub_label.pack(anchor="w")
-        
-        # Right controls: Drive status & Backup
-        ctrl_box = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        lbl_badge.pack(side="left", padx=(10, 0))
+
+        # Status & Controls Box (Right)
+        ctrl_box = ctk.CTkFrame(header, fg_color="transparent")
         ctrl_box.pack(side="right", padx=20, pady=12)
         
+        # Status Badge
         self.status_badge = ctk.CTkLabel(
             ctrl_box,
             text="Verificando...",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            fg_color="#27272a",
-            corner_radius=6,
-            padx=12,
-            pady=6
+            font=ctk.CTkFont(size=12, weight="bold"),
+            corner_radius=8,
+            width=160,
+            height=30
         )
         self.status_badge.pack(side="left", padx=8)
         
-        # Drive selector dropdown
+        # Drive selector
         drives = get_available_drives()
         self.drive_menu = ctk.CTkOptionMenu(
             ctrl_box,
@@ -423,26 +199,30 @@ class HeadRushApp(ctk.CTk):
             width=70,
             command=self.on_drive_changed
         )
-        if self.backend.drive in drives:
-            self.drive_menu.set(self.backend.drive)
+        self.drive_menu.set(self.backend.drive)
         self.drive_menu.pack(side="left", padx=6)
         
+        # Refresh Button
         btn_refresh = ctk.CTkButton(
             ctrl_box,
             text="🔄",
             width=36,
-            fg_color="#3f3f46",
-            hover_color="#52525b",
-            command=self.refresh_connection
+            height=30,
+            font=ctk.CTkFont(size=14),
+            fg_color="#27272a",
+            hover_color="#3f3f46",
+            command=self.refresh_all
         )
-        btn_refresh.pack(side="left", padx=4)
+        btn_refresh.pack(side="left", padx=6)
         
+        # Backup Button
         btn_backup = ctk.CTkButton(
             ctrl_box,
-            text="💾 Fazer Backup",
-            width=110,
-            fg_color="#2563eb",
-            hover_color="#1d4ed8",
+            text="💾 Backup",
+            width=90,
+            height=30,
+            fg_color="#0284c7",
+            hover_color="#0369a1",
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self.trigger_backup
         )
@@ -455,12 +235,20 @@ class HeadRushApp(ctk.CTk):
         self.tab_installed = self.tabview.add("  🎸 Minha Pedaleira (Slots 000-100)  ")
         self.tab_catalog = self.tabview.add("  🔍 Catálogo TONE3000 (97k Timbres)  ")
         self.tab_irs = self.tabview.add("  🔊 Impulse Responses (IRs)  ")
+        self.tab_backups = self.tabview.add("  💾 Backups & Restauração  ")
         self.tab_help = self.tabview.add("  ℹ️ Instruções e Ajuda  ")
         
         self.setup_installed_tab()
         self.setup_catalog_tab()
         self.setup_irs_tab()
+        self.setup_backups_tab()
         self.setup_help_tab()
+
+    def refresh_all(self):
+        self.refresh_connection()
+        self.refresh_installed_slots()
+        self.refresh_irs_list()
+        self.refresh_backups_list()
 
     # ====================================================================
     # TAB 1: INSTALLED SLOTS
@@ -505,7 +293,7 @@ class HeadRushApp(ctk.CTk):
         if not self.backend.is_connected():
             empty_lbl = ctk.CTkLabel(
                 self.slots_scroll,
-                text="Pedaleira não detectada.\nConecte o cabo USB da HeadRush MX5 e clique em 🔄 Atualizar.",
+                text="Pedaleira não detectada.\nConecte o cabo USB da HeadRush MX5 no modo USB Transfer e clique em 🔄 Atualizar.",
                 font=ctk.CTkFont(size=15),
                 text_color="#71717a"
             )
@@ -514,6 +302,15 @@ class HeadRushApp(ctk.CTk):
 
         filter_text = self.ent_filter_installed.get().strip().lower()
         
+        if not slots:
+            ctk.CTkLabel(
+                self.slots_scroll,
+                text="Nenhum timbre instalado ainda na pasta /NAM.\nVá na aba 'Catálogo TONE3000' para instalar modelos com 1 clique!",
+                font=ctk.CTkFont(size=14),
+                text_color="#71717a"
+            ).pack(pady=50)
+            return
+            
         for s in sorted(slots.keys()):
             info = slots[s]
             pname = info.get('preset_name') or "(Sem preset)"
@@ -583,20 +380,36 @@ class HeadRushApp(ctk.CTk):
         )
         trims_lbl.pack(side="left", padx=10)
         
-        # Actions
+        # Actions Box
+        actions_box = ctk.CTkFrame(row, fg_color="transparent")
+        actions_box.pack(side="right", padx=6)
+        
         btn_edit = ctk.CTkButton(
-            row,
-            text="✏️ Trims",
-            width=65,
+            actions_box,
+            text="✏️ Trims / Editar",
+            width=110,
             height=28,
             fg_color="#27272a",
             hover_color="#3f3f46",
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=lambda s=info['slot']: self.open_edit_dialog(s)
         )
-        btn_edit.pack(side="right", padx=6)
+        btn_edit.pack(side="left", padx=4)
+
+        btn_move = ctk.CTkButton(
+            actions_box,
+            text="🚚 Mover",
+            width=70,
+            height=28,
+            fg_color="#334155",
+            hover_color="#475569",
+            font=ctk.CTkFont(size=12),
+            command=lambda s=info['slot']: self.open_move_dialog(s)
+        )
+        btn_move.pack(side="left", padx=4)
         
         btn_del = ctk.CTkButton(
-            row,
+            actions_box,
             text="🗑️",
             width=36,
             height=28,
@@ -604,63 +417,192 @@ class HeadRushApp(ctk.CTk):
             hover_color="#991b1b",
             command=lambda s=info['slot']: self.confirm_delete_slot(s)
         )
-        btn_del.pack(side="right", padx=6)
+        btn_del.pack(side="left", padx=4)
 
     def filter_installed_slots(self):
         self.refresh_installed_slots()
 
     def open_edit_dialog(self, slot_num):
+        """Advanced modal dialog to edit preset name, Tone/Level trims, with live sliders and number inputs."""
         slots = self.backend.get_installed_slots()
         if slot_num not in slots:
+            messagebox.showerror("Erro", f"Slot {slot_num:03d} não foi encontrado.")
             return
         info = slots[slot_num]
         
         dialog = ctk.CTkToplevel(self)
-        dialog.title(f"Ajustar Slot {slot_num:03d}")
-        dialog.geometry("400x320")
+        dialog.title(f"Ajustar Preset & Trims · Slot {slot_num:03d}")
+        dialog.geometry("480x460")
+        dialog.resizable(False, False)
         dialog.transient(self)
         dialog.grab_set()
         
         ctk.CTkLabel(
             dialog,
-            text=f"Calibrar Timbre - Slot {slot_num:03d}",
-            font=ctk.CTkFont(size=16, weight="bold")
-        ).pack(pady=12)
+            text=f"🎛️ Calibrar Timbre - Slot {slot_num:03d}",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#38bdf8"
+        ).pack(pady=(16, 4))
         
-        # Name
+        # Name Frame
         name_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        name_frame.pack(fill="x", padx=25, pady=6)
-        ctk.CTkLabel(name_frame, text="Nome no Visor:").pack(anchor="w")
-        ent_name = ctk.CTkEntry(name_frame)
-        ent_name.insert(0, info.get('preset_name') or "")
+        name_frame.pack(fill="x", padx=25, pady=(8, 4))
+        ctk.CTkLabel(name_frame, text="Nome do Preset (Visor da MX5):", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w")
+        ent_name = ctk.CTkEntry(name_frame, height=32, font=ctk.CTkFont(size=13))
+        ent_name.insert(0, info.get('preset_name') or info.get('nam_name') or "")
         ent_name.pack(fill="x", pady=4)
         
-        # Tone Trim slider
-        ctk.CTkLabel(dialog, text=f"Input Trim (Tone Knob):").pack(anchor="w", padx=25)
-        slider_tone = ctk.CTkSlider(dialog, from_=0, to=100, number_of_steps=100)
+        chk_sync_nam = ctk.CTkCheckBox(
+            name_frame, 
+            text="Sincronizar e renomear arquivo .nam em /NAM",
+            font=ctk.CTkFont(size=11),
+            text_color="#a1a1aa"
+        )
+        chk_sync_nam.select()
+        chk_sync_nam.pack(anchor="w", pady=(2, 8))
+
+        # Tone Trim Box (Input Gain)
+        tone_box = ctk.CTkFrame(dialog, fg_color="#18181b", corner_radius=8)
+        tone_box.pack(fill="x", padx=25, pady=6)
+        
+        top_tone = ctk.CTkFrame(tone_box, fg_color="transparent")
+        top_tone.pack(fill="x", padx=10, pady=(6, 0))
+        ctk.CTkLabel(top_tone, text="Tone Knob (Input Trim / Ganho de Entrada):", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        lbl_tone_val = ctk.CTkLabel(top_tone, text=f"{info.get('tone', 50)}", font=ctk.CTkFont(size=13, weight="bold"), text_color="#f59e0b")
+        lbl_tone_val.pack(side="right")
+        
+        slider_tone = ctk.CTkSlider(tone_box, from_=0, to=100, number_of_steps=100)
         slider_tone.set(info.get('tone', 50))
-        slider_tone.pack(fill="x", padx=25, pady=4)
-        lbl_tone_val = ctk.CTkLabel(dialog, text=f"{int(slider_tone.get())}")
-        lbl_tone_val.pack()
+        slider_tone.pack(fill="x", padx=10, pady=(4, 8))
         slider_tone.configure(command=lambda v: lbl_tone_val.configure(text=str(int(v))))
+
+        # Level Trim Box (Output Volume)
+        level_box = ctk.CTkFrame(dialog, fg_color="#18181b", corner_radius=8)
+        level_box.pack(fill="x", padx=25, pady=6)
         
-        # Level Trim slider
-        ctk.CTkLabel(dialog, text=f"Output Level (Volume):").pack(anchor="w", padx=25)
-        slider_level = ctk.CTkSlider(dialog, from_=0, to=100, number_of_steps=100)
+        top_level = ctk.CTkFrame(level_box, fg_color="transparent")
+        top_level.pack(fill="x", padx=10, pady=(6, 0))
+        ctk.CTkLabel(top_level, text="Level Knob (Output Trim / Volume Geral):", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        lbl_level_val = ctk.CTkLabel(top_level, text=f"{info.get('level', 70)}", font=ctk.CTkFont(size=13, weight="bold"), text_color="#10b981")
+        lbl_level_val.pack(side="right")
+        
+        slider_level = ctk.CTkSlider(level_box, from_=0, to=100, number_of_steps=100)
         slider_level.set(info.get('level', 70))
-        slider_level.pack(fill="x", padx=25, pady=4)
-        lbl_level_val = ctk.CTkLabel(dialog, text=f"{int(slider_level.get())}")
-        lbl_level_val.pack()
+        slider_level.pack(fill="x", padx=10, pady=(4, 8))
         slider_level.configure(command=lambda v: lbl_level_val.configure(text=str(int(v))))
+
+        # Quick Preset Buttons
+        quick_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        quick_frame.pack(fill="x", padx=25, pady=4)
         
-        def save():
-            new_name = ent_name.get().strip() or info.get('preset_name')
-            self.backend.update_slot_trims(slot_num, new_name, int(slider_tone.get()), int(slider_level.get()))
-            dialog.destroy()
-            self.refresh_installed_slots()
+        def reset_defaults():
+            slider_tone.set(50)
+            lbl_tone_val.configure(text="50")
+            slider_level.set(70)
+            lbl_level_val.configure(text="70")
             
-        btn_save = ctk.CTkButton(dialog, text="Salvar Ajustes", fg_color="#16a34a", hover_color="#15803d", command=save)
-        btn_save.pack(pady=16)
+        btn_reset = ctk.CTkButton(
+            quick_frame,
+            text="🔄 Redefinir Padrão (50 / 70)",
+            fg_color="#27272a",
+            hover_color="#3f3f46",
+            height=26,
+            font=ctk.CTkFont(size=11),
+            command=reset_defaults
+        )
+        btn_reset.pack(side="left")
+
+        # Save Button
+        def save():
+            new_name = ent_name.get().strip()
+            if not new_name:
+                messagebox.showwarning("Aviso", "O nome do preset não pode ficar vazio.")
+                return
+                
+            tone_val = int(slider_tone.get())
+            level_val = int(slider_level.get())
+            sync_val = bool(chk_sync_nam.get())
+            
+            try:
+                self.backend.update_slot_trims(slot_num, new_name, tone_val, level_val, sync_nam=sync_val)
+                dialog.destroy()
+                self.refresh_installed_slots()
+                messagebox.showinfo(
+                    "Ajustes Salvos com Sucesso! 🎛️",
+                    f"Slot {slot_num:03d} atualizado:\n\n"
+                    f"• Nome: {new_name}\n"
+                    f"• Tone (Input Trim): {tone_val}\n"
+                    f"• Level (Volume): {level_val}\n\n"
+                    f"⚠️ Lembre-se: se você alterou o nome do arquivo, reinicie a pedaleira para atualizar o visor."
+                )
+            except Exception as e:
+                messagebox.showerror("Erro ao Salvar", str(e))
+            
+        btn_save = ctk.CTkButton(
+            dialog, 
+            text="💾 Salvar Alterações", 
+            fg_color="#16a34a", 
+            hover_color="#15803d", 
+            font=ctk.CTkFont(size=13, weight="bold"),
+            height=36,
+            command=save
+        )
+        btn_save.pack(fill="x", padx=25, pady=(12, 10))
+
+    def open_move_dialog(self, old_slot):
+        """Allows reassigning a model to another slot."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Mover Slot {old_slot:03d}")
+        dialog.geometry("380x260")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        slots = self.backend.get_installed_slots()
+        info = slots.get(old_slot, {})
+        pname = info.get('preset_name') or f"Slot {old_slot:03d}"
+        
+        ctk.CTkLabel(
+            dialog,
+            text=f"Mover '{pname}' (Slot {old_slot:03d})",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(pady=(16, 8))
+        
+        ctk.CTkLabel(dialog, text="Selecione o novo Slot de Destino (000-100):").pack(anchor="w", padx=25)
+        
+        slot_options = [f"{s:03d} {'(Ocupado)' if s in slots else '(Livre)'}" for s in range(101)]
+        opt_slots = ctk.CTkOptionMenu(dialog, values=slot_options, height=32)
+        # Default to first free slot
+        next_free = self.backend.get_next_free_slot()
+        if next_free is not None:
+            opt_slots.set(f"{next_free:03d} (Livre)")
+        opt_slots.pack(fill="x", padx=25, pady=8)
+        
+        def do_move():
+            val_str = opt_slots.get().split()[0]
+            new_s = int(val_str)
+            if new_s == old_slot:
+                dialog.destroy()
+                return
+                
+            if new_s in slots:
+                ans = messagebox.askyesno(
+                    "Substituir Slot",
+                    f"O Slot {new_s:03d} já contém '{slots[new_s].get('preset_name')}'.\nDeseja substituir esse timbre?"
+                )
+                if not ans:
+                    return
+                    
+            try:
+                self.backend.move_slot(old_slot, new_s)
+                dialog.destroy()
+                self.refresh_installed_slots()
+                messagebox.showinfo("Sucesso", f"Timbre movido para o Slot {new_s:03d} com sucesso!")
+            except Exception as e:
+                messagebox.showerror("Erro ao Mover", str(e))
+                
+        btn_confirm = ctk.CTkButton(dialog, text="Mover Agora", fg_color="#0284c7", hover_color="#0369a1", command=do_move)
+        btn_confirm.pack(fill="x", padx=25, pady=16)
 
     def confirm_delete_slot(self, slot_num):
         slots = self.backend.get_installed_slots()
@@ -679,161 +621,153 @@ class HeadRushApp(ctk.CTk):
     # TAB 2: TONE3000 CATALOG
     # ====================================================================
     def setup_catalog_tab(self):
-        # Search controls
-        ctrl_frame = ctk.CTkFrame(self.tab_catalog, fg_color="#1e1e24", corner_radius=8)
-        ctrl_frame.pack(fill="x", padx=10, pady=8)
+        # Search controls frame
+        search_frame = ctk.CTkFrame(self.tab_catalog, fg_color="#1e1e24", corner_radius=8)
+        search_frame.pack(fill="x", padx=10, pady=8)
         
-        # Search input
-        search_box = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        search_box.pack(fill="x", padx=12, pady=8)
-        
+        # Search entry
         self.ent_search = ctk.CTkEntry(
-            search_box,
-            placeholder_text="Digite o amplificador, pedal ou timbre (ex: 5150, Dumble, Petrucci, Klon, SLO...)",
-            height=38,
+            search_frame,
+            placeholder_text="🔍 Busque por amplificador, pedal, artista (ex: 5150, Dumble, Petrucci, Klon, Bogner)...",
+            height=36,
             font=ctk.CTkFont(size=13)
         )
-        self.ent_search.pack(side="left", fill="x", expand=True, padx=6)
-        self.ent_search.bind("<Return>", lambda e: self.perform_search())
+        self.ent_search.pack(side="left", fill="x", expand=True, padx=(12, 6), pady=10)
+        self.ent_search.bind("<Return>", lambda e: self.do_search())
         
-        btn_search = ctk.CTkButton(
-            search_box,
-            text="🔍 Pesquisar",
-            width=110,
-            height=38,
-            font=ctk.CTkFont(weight="bold"),
-            fg_color="#0284c7",
-            hover_color="#0369a1",
-            command=self.perform_search
+        # Category Filter
+        self.opt_category = ctk.CTkOptionMenu(
+            search_frame,
+            values=["Todos os Tipos", "Cabeçote / Amp", "Pedal de Drive", "Amp + Gabinete"],
+            width=140,
+            height=36,
+            command=lambda v: self.do_search()
         )
-        btn_search.pack(side="right", padx=6)
+        self.opt_category.pack(side="left", padx=4, pady=10)
         
-        # Filters row
-        filter_row = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        filter_row.pack(fill="x", padx=12, pady=4)
-        
-        ctk.CTkLabel(filter_row, text="Categoria:", text_color="#a1a1aa").pack(side="left", padx=4)
-        self.filter_gear = ctk.CTkOptionMenu(
-            filter_row,
-            values=["Todos", "Amps", "Pedais", "Amp + Cab"],
-            width=120,
-            command=lambda v: self.perform_search()
-        )
-        self.filter_gear.pack(side="left", padx=6)
-        
-        ctk.CTkLabel(filter_row, text="Arquitetura:", text_color="#a1a1aa").pack(side="left", padx=8)
-        self.filter_arch = ctk.CTkOptionMenu(
-            filter_row,
-            values=["A2 (Recomendado p/ MX5)", "Todos", "v1 Clássico"],
+        # Architecture Filter
+        self.opt_arch = ctk.CTkOptionMenu(
+            search_frame,
+            values=["Todas Arquiteturas", "A2 Slim (Recomendado MX5)", "v1 Standard"],
             width=180,
-            command=lambda v: self.perform_search()
+            height=36,
+            command=lambda v: self.do_search()
         )
-        self.filter_arch.pack(side="left", padx=6)
+        self.opt_arch.pack(side="left", padx=4, pady=10)
         
-        # Quick filter shortcuts
-        chips_frame = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        chips_frame.pack(fill="x", padx=12, pady=6)
-        ctk.CTkLabel(chips_frame, text="Atalhos:", font=ctk.CTkFont(size=11), text_color="#71717a").pack(side="left", padx=4)
+        # Search Button
+        btn_search = ctk.CTkButton(
+            search_frame,
+            text="Buscar",
+            width=90,
+            height=36,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self.do_search
+        )
+        btn_search.pack(side="left", padx=(4, 12), pady=10)
         
-        shortcuts = ["5150", "Dumble", "Petrucci", "Andy Timmons", "1981 DRV", "Mesa Boogie", "Bogner", "Soldano", "Plexi"]
-        for s in shortcuts:
-            btn = ctk.CTkButton(
-                chips_frame,
-                text=s,
+        # Quick Tags Bar
+        tags_bar = ctk.CTkFrame(self.tab_catalog, fg_color="transparent")
+        tags_bar.pack(fill="x", padx=10, pady=(0, 4))
+        
+        quick_tags = ["5150", "Dumble", "Petrucci", "Andy Timmons", "1981 DRV", "Mesa Boogie", "Bogner", "Friedman", "Marshall", "Soldano", "Klon", "King of Tone", "TS808"]
+        for tag in quick_tags:
+            btn_tag = ctk.CTkButton(
+                tags_bar,
+                text=tag,
                 height=24,
-                width=65,
                 font=ctk.CTkFont(size=11),
                 fg_color="#27272a",
                 hover_color="#3f3f46",
-                command=lambda term=s: self.search_shortcut(term)
+                command=lambda t=tag: self.quick_search(t)
             )
-            btn.pack(side="left", padx=3)
+            btn_tag.pack(side="left", padx=2, pady=2)
             
-        # Search results scrollable area
+        # Catalog Results Scroll
         self.catalog_scroll = ctk.CTkScrollableFrame(self.tab_catalog, fg_color="transparent")
-        self.catalog_scroll.pack(fill="both", expand=True, padx=6, pady=6)
+        self.catalog_scroll.pack(fill="both", expand=True, padx=6, pady=4)
         
-        # Initial empty state
-        self.show_search_placeholder()
+        # Initial search
+        self.quick_search("Dumble")
 
-    def show_search_placeholder(self):
-        for widget in self.catalog_scroll.winfo_children():
-            widget.destroy()
-        lbl = ctk.CTkLabel(
-            self.catalog_scroll,
-            text="⚡ Pesquise qualquer timbre entre os 97.974 modelos locais\nou clique em um dos atalhos acima para explorar!",
-            font=ctk.CTkFont(size=14),
-            text_color="#71717a"
-        )
-        lbl.pack(pady=70)
-
-    def search_shortcut(self, term):
+    def quick_search(self, query):
         self.ent_search.delete(0, 'end')
-        self.ent_search.insert(0, term)
-        self.perform_search()
+        self.ent_search.insert(0, query)
+        self.do_search()
 
-    def perform_search(self):
-        q = self.ent_search.get().strip()
-        if not q:
-            self.show_search_placeholder()
+    def do_search(self):
+        query = self.ent_search.get().strip()
+        if not query:
             return
             
         for widget in self.catalog_scroll.winfo_children():
             widget.destroy()
             
-        loading_lbl = ctk.CTkLabel(self.catalog_scroll, text="Buscando no acervo...", font=ctk.CTkFont(size=14))
-        loading_lbl.pack(pady=40)
-        
-        gear_sel = self.filter_gear.get()
-        arch_sel = self.filter_arch.get()
-        
-        # Run search query in a background thread to keep UI super responsive
-        threading.Thread(target=self._run_search_thread, args=(q, gear_sel, arch_sel), daemon=True).start()
+        if not os.path.exists(DB_PATH):
+            ctk.CTkLabel(
+                self.catalog_scroll,
+                text=f"Banco de dados Tone3000 não encontrado em:\n{DB_PATH}",
+                font=ctk.CTkFont(size=14),
+                text_color="#ef4444"
+            ).pack(pady=40)
+            return
 
-    def _run_search_thread(self, query, gear_sel, arch_sel):
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
+        cat_choice = self.opt_category.get()
+        cat_map = {
+            "Cabeçote / Amp": "amp",
+            "Pedal de Drive": "pedal",
+            "Amp + Gabinete": "amp-cab"
+        }
+        target_gear = cat_map.get(cat_choice)
         
-        sql = '''
-            SELECT m.id, m.name, t.title, COALESCE(u.username, u.display_name, 'Community'),
-                   m.architecture_version, t.gear, m.local_path, t.description
-            FROM models_fts fts
-            JOIN models m ON fts.model_id = m.id
-            JOIN tones t ON m.tone_id = t.id
-            LEFT JOIN users u ON t.user_id = u.id
-            WHERE models_fts MATCH ?
-        '''
-        params = [f'"{query}"*']
-        
-        if gear_sel == "Amps":
-            sql += " AND t.gear = 'amp'"
-        elif gear_sel == "Pedais":
-            sql += " AND t.gear = 'pedal'"
-        elif gear_sel == "Amp + Cab":
-            sql += " AND t.gear = 'amp-cab'"
-            
-        if arch_sel == "A2 (Recomendado p/ MX5)":
-            sql += " AND m.architecture_version = '2'"
-        elif arch_sel == "v1 Clássico":
-            sql += " AND m.architecture_version = '1'"
-            
-        sql += " LIMIT 50"
-        cur.execute(sql, params)
-        rows = cur.fetchall()
-        conn.close()
-        
-        self.after(0, lambda: self._render_search_results(rows, query))
+        arch_choice = self.opt_arch.get()
+        arch_filter = None
+        if "A2" in arch_choice:
+            arch_filter = '2'
+        elif "v1" in arch_choice:
+            arch_filter = '1'
 
-    def _render_search_results(self, rows, query):
-        for widget in self.catalog_scroll.winfo_children():
-            widget.destroy()
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
             
+            sql = '''
+                SELECT m.id, m.name, t.title, COALESCE(u.username, u.display_name, 'Community'),
+                       m.architecture_version, m.gear_type, m.local_path, t.description
+                FROM models_fts fts
+                JOIN models m ON fts.model_id = m.id
+                JOIN tones t ON m.tone_id = t.id
+                LEFT JOIN users u ON t.user_id = u.id
+                WHERE models_fts MATCH ?
+            '''
+            params = [f'"{query}"*']
+            
+            if target_gear:
+                sql += ' AND m.gear_type = ?'
+                params.append(target_gear)
+                
+            if arch_filter:
+                sql += ' AND m.architecture_version = ?'
+                params.append(arch_filter)
+                
+            sql += ' LIMIT 40'
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            conn.close()
+        except Exception as e:
+            ctk.CTkLabel(
+                self.catalog_scroll,
+                text=f"Erro na consulta SQL: {e}",
+                text_color="#ef4444"
+            ).pack(pady=20)
+            return
+
         if not rows:
             ctk.CTkLabel(
                 self.catalog_scroll,
-                text=f"Nenhum modelo encontrado para '{query}'. Tente outro termo.",
+                text=f"Nenhum modelo encontrado para '{query}'.\nTente buscar com termos mais gerais (ex: Marshall, Drive, Clean, Lead).",
                 font=ctk.CTkFont(size=14),
-                text_color="#ef4444"
+                text_color="#71717a"
             ).pack(pady=40)
             return
             
@@ -846,11 +780,16 @@ class HeadRushApp(ctk.CTk):
         )
         summary_lbl.pack(fill="x", padx=8, pady=4)
         
+        installed_slots = self.backend.get_installed_slots()
+        installed_names = {info.get('preset_name', '').lower(): s for s, info in installed_slots.items()}
+        
         for r in rows:
             m_id, m_name, t_title, creator, a_ver, gear, rel_path, desc = r
-            self.create_catalog_card(m_id, m_name, t_title, creator, a_ver, gear, rel_path)
+            is_installed = m_name.lower() in installed_names
+            installed_slot = installed_names.get(m_name.lower())
+            self.create_catalog_card(m_id, m_name, t_title, creator, a_ver, gear, rel_path, is_installed, installed_slot)
 
-    def create_catalog_card(self, m_id, m_name, t_title, creator, a_ver, gear, rel_path):
+    def create_catalog_card(self, m_id, m_name, t_title, creator, a_ver, gear, rel_path, is_installed=False, installed_slot=None):
         card = ctk.CTkFrame(self.catalog_scroll, fg_color="#18181b", corner_radius=8)
         card.pack(fill="x", pady=4, padx=4)
         
@@ -873,14 +812,29 @@ class HeadRushApp(ctk.CTk):
         info_box = ctk.CTkFrame(card, fg_color="transparent")
         info_box.pack(side="left", fill="x", expand=True, padx=8)
         
+        title_box = ctk.CTkFrame(info_box, fg_color="transparent")
+        title_box.pack(anchor="w")
+        
         title_lbl = ctk.CTkLabel(
-            info_box,
+            title_box,
             text=m_name,
             font=ctk.CTkFont(size=14, weight="bold"),
-            text_color="#ffffff",
-            anchor="w"
+            text_color="#ffffff"
         )
-        title_lbl.pack(anchor="w")
+        title_lbl.pack(side="left")
+        
+        if is_installed:
+            inst_badge = ctk.CTkLabel(
+                title_box,
+                text=f"✓ Instalado (Slot {installed_slot:03d})",
+                font=ctk.CTkFont(size=10, weight="bold"),
+                fg_color="#065f46",
+                text_color="#a7f3d0",
+                corner_radius=4,
+                width=120,
+                height=18
+            )
+            inst_badge.pack(side="left", padx=8)
         
         gear_pt = {"amp": "Cabeçote", "pedal": "Pedal", "amp-cab": "Amp + Caixa", "outboard": "Outboard"}.get(gear, gear)
         desc_lbl = ctk.CTkLabel(
@@ -892,18 +846,21 @@ class HeadRushApp(ctk.CTk):
         )
         desc_lbl.pack(anchor="w")
         
-        # Install Button
+        # Install Button Box
+        btn_box = ctk.CTkFrame(card, fg_color="transparent")
+        btn_box.pack(side="right", padx=12, pady=10)
+        
         btn_send = ctk.CTkButton(
-            card,
+            btn_box,
             text="⚡ Enviar p/ MX5",
-            width=135,
+            width=130,
             height=32,
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#0284c7",
             hover_color="#0369a1",
             command=lambda p=rel_path, n=m_name: self.install_model_action(p, n)
         )
-        btn_send.pack(side="right", padx=12, pady=10)
+        btn_send.pack(side="left", padx=2)
 
     def install_model_action(self, rel_path, model_name):
         if not self.backend.is_connected():
@@ -1052,26 +1009,122 @@ class HeadRushApp(ctk.CTk):
         btn_create.pack(pady=20)
 
     # ====================================================================
-    # TAB 4: HELP & INSTRUCTIONS
+    # TAB 4: BACKUPS & RESTAURAÇÃO
+    # ====================================================================
+    def setup_backups_tab(self):
+        top_bar = ctk.CTkFrame(self.tab_backups, fg_color="#1e1e24", corner_radius=8)
+        top_bar.pack(fill="x", padx=10, pady=8)
+        
+        ctk.CTkLabel(
+            top_bar,
+            text="💾 Gerenciador de Backups & Restauração",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#38bdf8"
+        ).pack(side="left", padx=16, pady=10)
+        
+        btn_new_backup = ctk.CTkButton(
+            top_bar,
+            text="➕ Criar Novo Backup Agora",
+            fg_color="#16a34a",
+            hover_color="#15803d",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self.trigger_backup
+        )
+        btn_new_backup.pack(side="right", padx=16, pady=10)
+        
+        self.backups_scroll = ctk.CTkScrollableFrame(self.tab_backups, fg_color="transparent")
+        self.backups_scroll.pack(fill="both", expand=True, padx=6, pady=6)
+        
+        self.refresh_backups_list()
+
+    def refresh_backups_list(self):
+        for widget in self.backups_scroll.winfo_children():
+            widget.destroy()
+            
+        backups = self.backend.list_backups()
+        if not backups:
+            ctk.CTkLabel(
+                self.backups_scroll,
+                text="Nenhum backup encontrado ainda.\nClique em 'Criar Novo Backup Agora' para salvar um snapshot da sua pedaleira.",
+                font=ctk.CTkFont(size=14),
+                text_color="#71717a"
+            ).pack(pady=50)
+            return
+            
+        for b in backups:
+            card = ctk.CTkFrame(self.backups_scroll, fg_color="#18181b", corner_radius=8)
+            card.pack(fill="x", pady=4, padx=4)
+            
+            info_box = ctk.CTkFrame(card, fg_color="transparent")
+            info_box.pack(side="left", fill="x", expand=True, padx=12, pady=10)
+            
+            ctk.CTkLabel(
+                info_box,
+                text=f"📦 {b['name']}",
+                font=ctk.CTkFont(size=13, weight="bold"),
+                text_color="#ffffff",
+                anchor="w"
+            ).pack(anchor="w")
+            
+            ctk.CTkLabel(
+                info_box,
+                text=f"Caminho: {b['path']}",
+                font=ctk.CTkFont(size=11),
+                text_color="#71717a",
+                anchor="w"
+            ).pack(anchor="w")
+            
+            btn_restore = ctk.CTkButton(
+                card,
+                text="♻️ Restaurar p/ MX5",
+                width=140,
+                height=30,
+                fg_color="#d97706",
+                hover_color="#b45309",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                command=lambda p=b['path']: self.confirm_restore_backup(p)
+            )
+            btn_restore.pack(side="right", padx=12, pady=10)
+
+    def confirm_restore_backup(self, backup_dir):
+        if not self.backend.is_connected():
+            messagebox.showerror("Erro", "Pedaleira desconectada. Conecte no modo USB para restaurar.")
+            return
+            
+        ans = messagebox.askyesno(
+            "Confirmar Restauração",
+            f"Atenção! Restaurar este backup substituirá todos os timbres e blocos atuais da sua pedaleira.\n\n"
+            f"Origem do Backup:\n{backup_dir}\n\nDeseja continuar?"
+        )
+        if ans:
+            try:
+                self.backend.restore_backup(backup_dir)
+                self.refresh_installed_slots()
+                messagebox.showinfo("Restauração Concluída", "Backup restaurado com sucesso para a HeadRush MX5!\n\nLembre-se de reiniciar a pedaleira.")
+            except Exception as e:
+                messagebox.showerror("Erro na Restauração", str(e))
+
+    # ====================================================================
+    # TAB 5: HELP & INSTRUCTIONS
     # ====================================================================
     def setup_help_tab(self):
         frame = ctk.CTkScrollableFrame(self.tab_help, fg_color="transparent")
         frame.pack(fill="both", expand=True, padx=12, pady=12)
         
         help_text = """
-# 🎸 GUIA DE USO · HEADRUSH MX5 NAM MOD
+# 🎸 GUIA COMPLETO · HEADRUSH NAM STUDIO PRO
 
 ### 🔌 1. Como Conectar e Desconectar a MX5
 1. Conecte a pedaleira ao PC com o cabo USB.
 2. Na tela da MX5, toque nos 3 pontinhos (Menu Global) -> **USB Transfer**.
 3. A pedaleira aparecerá como uma unidade removível (geralmente `E:`).
 4. Para desconectar com segurança: toque em **Sync / Eject** na tela da pedaleira antes de remover o cabo.
-5. **IMPORTANTE**: Após transferir novos timbres, reinicie a pedaleira (desligue e ligue) para que o firmware leia os novos arquivos da pasta `/NAM`.
+5. **IMPORTANTE**: Após transferir novos timbres, reinicie a pedaleira (desligue e ligue no botão) para que o firmware leia os novos arquivos da pasta `/NAM`.
 
 ---
 
 ### 🎛️ 2. Como Tocar os Timbres na MX5
-1. Em qualquer Rig, adicione o pedal **Anxiety OD V2**.
+1. Em qualquer Rig, adicione o pedal **Anxiety OD V2** (ou **Anxiety OD**).
 2. Toque no pedal e abra a lista de **Presets**.
 3. Você verá todos os seus presets numerados exatamente com o slot (ex.: `028 - 1981 DRV MED GAIN`, `031 - DUMBLE SSS CLEAN EVM`).
 4. Ao selecionar o preset:
@@ -1081,7 +1134,15 @@ class HeadRushApp(ctk.CTk):
 
 ---
 
-### 🔊 3. Dica sobre Gabinetes e IRs
+### ✏️ 3. Como Editar Presets e Trims no App
+- Na aba **Minha Pedaleira**, clique no botão **✏️ Trims / Editar** ao lado de qualquer timbre.
+- Ajuste os controles de **Tone** e **Level** graficamente.
+- Você pode alterar o nome de exibição no visor e sincronizar automaticamente o nome do arquivo `.nam`.
+- Se quiser reordenar seus timbres, use o botão **🚚 Mover** para transferir o som para qualquer slot livre de 000 a 100!
+
+---
+
+### 🔊 4. Dica sobre Gabinetes e IRs
 - **Modelos [A2] Cabeçote (Amps)**: Requerem um bloco de **IR** logo após o Anxiety OD V2. Use a aba "Impulse Responses" para criar blocos prontos!
 - **Modelos [A2] Full Rig (Amp+Cab)**: Já possuem gabinete capturado no arquivo, não precisa de IR adicional.
 - **Pedais de Overdrive/Distorção**: Devem ser posicionados antes do amplificador no seu rig.
@@ -1100,9 +1161,7 @@ class HeadRushApp(ctk.CTk):
     # ====================================================================
     def on_drive_changed(self, choice):
         self.backend.set_drive(choice)
-        self.refresh_connection()
-        self.refresh_installed_slots()
-        self.refresh_irs_list()
+        self.refresh_all()
 
     def refresh_connection(self):
         drives = get_available_drives()
@@ -1128,6 +1187,7 @@ class HeadRushApp(ctk.CTk):
             return
         try:
             bdir = self.backend.backup()
+            self.refresh_backups_list()
             messagebox.showinfo(
                 "Backup Realizado com Sucesso!",
                 f"O backup completo dos seus modelos NAM e Presets foi salvo em:\n\n{bdir}"
@@ -1141,4 +1201,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
