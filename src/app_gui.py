@@ -256,15 +256,27 @@ class HeadRushApp(ctk.CTk):
         
         lbl_badge = ctk.CTkLabel(
             title_box,
-            text="v1.1.0",
+            text="v1.3 · Gratuito",
             font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="#27272a",
-            text_color="#a1a1aa",
+            fg_color="#16a34a",
+            text_color="#ffffff",
             corner_radius=6,
-            width=50,
+            width=90,
             height=20
         )
         lbl_badge.pack(side="left", padx=(10, 0))
+
+        lbl_dev = ctk.CTkLabel(
+            title_box,
+            text="⚡ Em Desenvolvimento",
+            font=ctk.CTkFont(size=11),
+            fg_color="#27272a",
+            text_color="#fbbf24",
+            corner_radius=6,
+            width=140,
+            height=20
+        )
+        lbl_dev.pack(side="left", padx=(6, 0))
 
         # Status & Controls Box (Right)
         ctrl_box = ctk.CTkFrame(header, fg_color="transparent")
@@ -331,6 +343,136 @@ class HeadRushApp(ctk.CTk):
         )
         btn_eject.pack(side="left", padx=4)
 
+        # Coffee / Support Button
+        btn_coffee = ctk.CTkButton(
+            ctrl_box,
+            text="☕ Apoiar / Café",
+            width=115,
+            height=30,
+            fg_color="#d97706",
+            hover_color="#b45309",
+            text_color="#ffffff",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self.show_donation_dialog
+        )
+        btn_coffee.pack(side="left", padx=4)
+
+    def show_donation_dialog(self):
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("☕ Apoie o HeadRush NAM Studio")
+        dlg.geometry("540x440")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        # Header banner
+        banner = ctk.CTkFrame(dlg, fg_color="#1e1e24", corner_radius=0)
+        banner.pack(fill="x", padx=0, pady=0)
+
+        ctk.CTkLabel(
+            banner,
+            text="☕ Me pague um café para apoiar o projeto!",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#f59e0b"
+        ).pack(anchor="w", padx=20, pady=(16, 4))
+
+        ctk.CTkLabel(
+            banner,
+            text="Software 100% Gratuito, Aberto e em Desenvolvimento Ativo",
+            font=ctk.CTkFont(size=12),
+            text_color="#94a3b8"
+        ).pack(anchor="w", padx=20, pady=(0, 14))
+
+        # Content body
+        body = ctk.CTkFrame(dlg, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=20, pady=16)
+
+        msg = (
+            "🎸 O HeadRush NAM Studio foi criado por amor à música e para libertar "
+            "todo o potencial sonoro da HeadRush MX5 com perfis Neural Amp Modeler (NAM), "
+            "gerenciamento dos 101 slots, gerador de blocos V1/V2 e acesso à nuvem TONE3000.\n\n"
+            "💡 Esta ferramenta é totalmente GRATUITA e está em contínuo desenvolvimento "
+            "com novas melhorias e correções sendo lançadas regularmente.\n\n"
+            "Se o programa te ajuda nos seus ensaios, gravações ou shows, considere me pagar "
+            "um café para ajudar a manter o projeto ativo e apoiar o tempo de desenvolvimento!"
+        )
+        ctk.CTkLabel(
+            body,
+            text=msg,
+            font=ctk.CTkFont(size=12),
+            text_color="#e4e4e7",
+            justify="left",
+            wraplength=490
+        ).pack(anchor="w", pady=(0, 14))
+
+        # PIX box
+        pix_frame = ctk.CTkFrame(body, fg_color="#18181b", corner_radius=8, border_width=1, border_color="#3f3f46")
+        pix_frame.pack(fill="x", pady=6)
+
+        ctk.CTkLabel(
+            pix_frame,
+            text="🔑 Chave PIX / Apoio (Qualquer valor é muito bem-vindo!):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#38bdf8"
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+
+        pix_row = ctk.CTkFrame(pix_frame, fg_color="transparent")
+        pix_row.pack(fill="x", padx=14, pady=(0, 10))
+
+        ent_pix = ctk.CTkEntry(
+            pix_row,
+            height=32,
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        ent_pix.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        
+        default_pix = "tiago.guitar.dev@gmail.com"
+        ent_pix.insert(0, default_pix)
+
+        def _copy_pix():
+            self.clipboard_clear()
+            self.clipboard_append(ent_pix.get().strip())
+            btn_copy.configure(text="✓ Copiado!", fg_color="#16a34a")
+            self.after(2000, lambda: btn_copy.configure(text="📋 Copiar PIX", fg_color="#d97706"))
+
+        btn_copy = ctk.CTkButton(
+            pix_row,
+            text="📋 Copiar PIX",
+            width=110,
+            height=32,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#d97706",
+            hover_color="#b45309",
+            command=_copy_pix
+        )
+        btn_copy.pack(side="left")
+
+        # Bottom buttons
+        btn_box = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_box.pack(fill="x", padx=20, pady=(0, 16))
+
+        def _open_github():
+            import webbrowser
+            webbrowser.open("https://github.com/tiagojsoares/headrush-nam-studio")
+
+        ctk.CTkButton(
+            btn_box,
+            text="⭐ Ver Projeto no GitHub",
+            font=ctk.CTkFont(size=12),
+            fg_color="#27272a",
+            hover_color="#3f3f46",
+            command=_open_github
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            btn_box,
+            text="Fechar",
+            width=80,
+            font=ctk.CTkFont(size=12),
+            fg_color="#334155",
+            hover_color="#475569",
+            command=dlg.destroy
+        ).pack(side="right")
+
     def trigger_eject(self):
         res = self.backend.safe_eject()
         messagebox.showinfo(
@@ -358,6 +500,30 @@ class HeadRushApp(ctk.CTk):
         self.setup_irs_tab()
         self.setup_backups_tab()
         self.setup_help_tab()
+
+        # Persistent Footer Banner
+        footer = ctk.CTkFrame(self, height=28, fg_color="#18181b", corner_radius=0)
+        footer.pack(fill="x", side="bottom")
+
+        lbl_footer_status = ctk.CTkLabel(
+            footer,
+            text="✨ Software 100% Gratuito · Em Desenvolvimento Ativo para a HeadRush MX5",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8"
+        )
+        lbl_footer_status.pack(side="left", padx=16, pady=2)
+
+        btn_support_footer = ctk.CTkButton(
+            footer,
+            text="☕ Apoiar / Me Pague um Café",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="transparent",
+            hover_color="#27272a",
+            text_color="#f59e0b",
+            height=22,
+            command=self.show_donation_dialog
+        )
+        btn_support_footer.pack(side="right", padx=16, pady=2)
 
     def refresh_all(self):
         self.refresh_connection()
@@ -1793,6 +1959,13 @@ class HeadRushApp(ctk.CTk):
 - **Modelos [A2] Cabeçote (Amps)**: Requerem um bloco de **IR** logo após o Anxiety OD V2. Use a aba "Impulse Responses" para criar blocos prontos!
 - **Modelos [A2] Full Rig (Amp+Cab)**: Já possuem gabinete capturado no arquivo, não precisa de IR adicional.
 - **Pedais de Overdrive/Distorção**: Devem ser posicionados antes do amplificador no seu rig.
+
+---
+
+### ☕ 5. Projeto Gratuito & Apoio ao Desenvolvedor
+- O **HeadRush NAM Studio Pro** é e sempre será **100% gratuito e livre**.
+- O projeto está em desenvolvimento ativo com novas atualizações e melhorias frequentes.
+- Se o programa é útil para você, considere pagar um café para incentivar e manter o projeto vivo!
 """
         lbl = ctk.CTkLabel(
             frame,
@@ -1802,6 +1975,33 @@ class HeadRushApp(ctk.CTk):
             text_color="#d4d4d8"
         )
         lbl.pack(anchor="w", padx=10, pady=10)
+
+        # Help Tab Donation Banner
+        donate_card = ctk.CTkFrame(frame, fg_color="#1e1e24", corner_radius=8, border_width=1, border_color="#d97706")
+        donate_card.pack(fill="x", padx=10, pady=16)
+
+        ctk.CTkLabel(
+            donate_card,
+            text="☕ Gostou da ferramenta? Pague um café para o desenvolvedor!",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#f59e0b"
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        ctk.CTkLabel(
+            donate_card,
+            text="Sua contribuição ajuda a cobrir os custos e o tempo dedicado a criar novos recursos para a comunidade.",
+            font=ctk.CTkFont(size=12),
+            text_color="#94a3b8"
+        ).pack(anchor="w", padx=16, pady=(0, 10))
+
+        ctk.CTkButton(
+            donate_card,
+            text="☕ Apoiar Agora / Chave PIX",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#d97706",
+            hover_color="#b45309",
+            command=self.show_donation_dialog
+        ).pack(anchor="w", padx=16, pady=(0, 12))
 
     # ====================================================================
     # GLOBAL ACTIONS

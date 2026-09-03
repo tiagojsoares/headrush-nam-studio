@@ -5,16 +5,49 @@ import urllib.parse
 import urllib.error
 import headrush_manager as hm
 
+import hashlib
+import struct
+
 CONFIG_PATH = os.path.expanduser("~/.headrush_nam_studio/config.json")
-DEFAULT_PUB_KEY = ""
-DEFAULT_SEC_KEY = ""
 BASE_URL = "https://www.tone3000.com/api/v1"
+
+# Chaves padrão criptografadas para acesso out-of-the-box
+_MASTER_KEY = b"HeadRush_NAM_Studio_Tiago_Master_Key_2026_Secure"
+_ENC_PUB = "808746ee0458d7612025c58336f525c880cf590a79c471b7bf4af68681a54e8fed8e718d0f64893b"
+_ENC_SEC = "808746ee175eea5b593eb2ad72e209bbfeb25f077c9a12a2c532acda8cf872d4b0d42da20d78f67dfdb6bafb2e7dd2c6200a9d5625aaa1ff6cb69cae502bda0b14484edcb40fea13"
+
+def _decrypt_embedded_key(hex_str: str) -> str:
+    """Descriptografa a credencial interna em tempo de execução."""
+    try:
+        data = bytes.fromhex(hex_str)
+        salt = b"hr_nam_salt_v1"
+        key = hashlib.sha256(_MASTER_KEY + salt).digest()
+        out = bytearray()
+        for i, b in enumerate(data):
+            block = hashlib.sha256(key + struct.pack("<I", i // 32)).digest()
+            out.append(b ^ block[i % 32])
+        return out.decode("utf-8")
+    except Exception:
+        return ""
 
 class Tone3000Client:
     def __init__(self, public_key=None, secret_key=None):
         config = self._load_config()
-        self.public_key = public_key or os.environ.get("TONE3000_PUBLIC_KEY") or config.get("public_key") or DEFAULT_PUB_KEY
-        self.secret_key = secret_key or os.environ.get("TONE3000_SECRET_KEY") or config.get("secret_key") or DEFAULT_SEC_KEY
+        # 1. Configuração do usuário local (se houver)
+        # 2. Variável de ambiente
+        # 3. Chave padrão interna descriptografada em tempo de execução
+        self.public_key = (
+            public_key or
+            os.environ.get("TONE3000_PUBLIC_KEY") or
+            config.get("public_key") or
+            _decrypt_embedded_key(_ENC_PUB)
+        )
+        self.secret_key = (
+            secret_key or
+            os.environ.get("TONE3000_SECRET_KEY") or
+            config.get("secret_key") or
+            _decrypt_embedded_key(_ENC_SEC)
+        )
         self.user_agent = "HeadRushNAMStudio/1.2"
 
     def _load_config(self):
