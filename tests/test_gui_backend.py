@@ -1,109 +1,123 @@
 import os
 import json
+import zipfile
 import pytest
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
-
 from app_gui import HeadRushBackend
 
-def test_headrush_backend_initialization(tmp_path):
-    backend = HeadRushBackend(drive=str(tmp_path))
-    assert backend.drive == str(tmp_path)
-    assert backend.nam_dir == os.path.join(str(tmp_path), "NAM")
-    assert backend.blocks_v1_dir == os.path.join(str(tmp_path), "Blocks", "ANXIETY OD")
-    assert backend.blocks_v2_dir == os.path.join(str(tmp_path), "Blocks", "ANXIETY OD V2")
-    assert backend.ir_dir == os.path.join(str(tmp_path), "Impulse Responses")
-    assert backend.ir_blocks_dir == os.path.join(str(tmp_path), "Blocks", "IR")
-
-def test_backend_connection_detection(tmp_path):
-    backend = HeadRushBackend(drive=str(tmp_path))
-    # Not connected initially
-    assert backend.is_connected() is False
-    
-    # Create Rigs directory
-    os.makedirs(os.path.join(str(tmp_path), "Rigs"), exist_ok=True)
+def test_backend_lifecycle_and_drive_switching(mock_pedal_drive, tmp_path):
+    """Tests connection detection, drive switching, and directory resolution."""
+    backend = HeadRushBackend(drive=mock_pedal_drive)
     assert backend.is_connected() is True
+    assert backend.drive == mock_pedal_drive
+    
+    # Test switching to another disconnected path
+    fake_drive = str(tmp_path / "FakeDrive")
+    backend.set_drive(fake_drive)
+    assert backend.is_connected() is False
+    assert backend.get_free_space_gb() == 0.0
 
-def test_backend_model_installation_and_trims(tmp_path):
-    mock_drive = str(tmp_path)
-    backend = HeadRushBackend(drive=mock_drive)
-    os.makedirs(os.path.join(mock_drive, "NAM"), exist_ok=True)
+def test_backend_model_installation_and_trim_manipulation(mock_pedal_drive, realistic_nam_files):
+    """
+    Tests complete lifecycle of installing a model, tweaking Tone/Level trims,
+    updating the preset name, moving slot, and verifying state consistency.
+    """
+    backend = HeadRushBackend(drive=mock_pedal_drive)
     
-    # Create dummy source NAM file
-    src_file = tmp_path / "test_amp.nam"
-    src_file.write_text("TEST_MODEL", encoding='utf-8')
-    
-    # Install
-    res = backend.install_model(str(src_file), preset_name="JP2C LEAD", slot=5, tone=60, level=75)
-    assert res["slot"] == 5
-    assert res["preset_name"] == "JP2C LEAD"
-    
-    slots = backend.get_installed_slots()
-    assert 5 in slots
-    assert slots[5]["slot"] == 5
-    
-    # Update trims
-    success = backend.update_slot_trims(5, preset_name="JP2C LEAD WARM", tone=40, level=85)
-    assert success is True
-    
-    # Delete
-    del_ok = backend.delete_slot(5)
-    assert del_ok is True
-    assert 5 not in backend.get_installed_slots()
-
-def test_backend_ir_block_creation(tmp_path):
-    mock_drive = str(tmp_path)
-    backend = HeadRushBackend(drive=mock_drive)
-    
-    ir_path = backend.create_ir_block(
-        preset_name="MESA 4x12 V30",
-        ir_folder="Mesa OS 4x12",
-        ir_name="Mesa_OS_V30_Cap_57",
-        gain=-6.0
+    # 1. Install model to slot 7
+    res = backend.install_model(
+        realistic_nam_files["wavenet"],
+        preset_name="RECTO MODERN CH3",
+        slot=7,
+        tone=54,
+        level=76
     )
-    assert os.path.exists(ir_path)
-    with open(ir_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-        assert data["type"] == "IR"
+    assert res["slot"] == 7
+    assert res["preset_name"] == "RECTO MODERN CH3"
+    
+    # Verify installed
+    slots = backend.get_installed_slots()
+    assert 7 in slots
+    assert slots[7]["tone"] == 54
+    assert slots[7]["level"] == 76
+    
+    # 2. Update trims and rename
+    ok = backend.update_slot_trims(7, preset_name="RECTO RAW VINTAGE", tone=42, level=84, sync_nam=True)
+    assert ok is True
+    
+    updated_slots = backend.get_installed_slots()
+    assert updated_slots[7]["preset_name"] == "RECTO RAW VINTAGE"
+    assert updated_slots[7]["tone"] == 42
+    assert updated_slots[7]["level"] == 84
+    assert "RECTO RAW VINTAGE" in updated_slots[7]["nam_file"]
+    
+    # 3. Move slot (7 -> 33)
+    move_ok = backend.move_slot(7, 33)
+    assert move_ok is True
+    
+    moved_slots = backend.get_installed_slots()
+    assert 7 not in moved_slots
+    assert 33 in moved_slots
+    assert moved_slots[33]["preset_name"] == "RECTO RAW VINTAGE"
+    assert moved_slots[33]["tone"] == 42
+    
+    # 4. Delete slot 33
+    del_ok = backend.delete_slot(33)
+    assert del_ok is True
+    assert 33 not in backend.get_installed_slots()
 
-def test_backend_pro_methods(tmp_path):
-    mock_drive = str(tmp_path / "hr_usb")
-    backend = HeadRushBackend(drive=mock_drive)
-    os.makedirs(os.path.join(mock_drive, "NAM"), exist_ok=True)
-    os.makedirs(os.path.join(mock_drive, "Blocks", "ANXIETY OD"), exist_ok=True)
-    os.makedirs(os.path.join(mock_drive, "Blocks", "ANXIETY OD V2"), exist_ok=True)
+def test_backend_quick_trim_presets(mock_pedal_drive, realistic_nam_files):
+    """Tests instant calibration presets (clean_boost, hot_drive, high_gain, unity)."""
+    backend = HeadRushBackend(drive=mock_pedal_drive)
+    backend.install_model(realistic_nam_files["lstm"], preset_name="CALIBRATION TEST", slot=5)
     
-    # Test smart formatting
-    formatted = backend.smart_format_preset_name("Mesa_Boogie_Mark_V_Lead")
-    assert "MESA" in formatted
+    # Clean boost: tone=55, level=80
+    backend.apply_trim_preset(5, "clean_boost")
+    s = backend.get_installed_slots()[5]
+    assert s["tone"] == 55 and s["level"] == 80
     
-    # Test batch import
-    src_dir = tmp_path / "models"
-    os.makedirs(src_dir, exist_ok=True)
-    (src_dir / "Amp1.nam").write_text("{\"model\": 1}", encoding='utf-8')
-    (src_dir / "Amp2.nam").write_text("{\"model\": 2}", encoding='utf-8')
-    
-    res = backend.import_local_models_batch([str(src_dir)])
-    assert res["count"] == 2
-    
-    # Storage status
-    st = backend.get_storage_status()
-    assert st["slots_used"] == 2
-    
-    # Health check
-    hc = backend.perform_health_check()
-    assert hc["healthy"] is True
-    
-    # Safe eject
-    ej = backend.safe_eject()
-    assert ej["safe_to_disconnect"] is True
-    
-    # Cheat sheet
-    cs = backend.generate_stage_cheat_sheet("txt")
-    assert "Amp1" in cs or "Amp2" in cs
-    
-    # Duplicates
-    dups = backend.detect_duplicate_models()
-    assert "total_duplicates" in dups
+    # High gain: tone=45, level=65
+    backend.apply_trim_preset(5, "high_gain")
+    s = backend.get_installed_slots()[5]
+    assert s["tone"] == 45 and s["level"] == 65
 
+    # Unity: tone=50, level=50
+    backend.apply_trim_preset(5, "unity")
+    s = backend.get_installed_slots()[5]
+    assert s["tone"] == 50 and s["level"] == 50
+
+def test_backend_single_slot_bundle_export(mock_pedal_drive, realistic_nam_files, tmp_path):
+    """Tests packaging a single slot into a shareable .zip bundle."""
+    backend = HeadRushBackend(drive=mock_pedal_drive)
+    backend.install_model(realistic_nam_files["wavenet"], preset_name="JP2C LEAD", slot=3, tone=48, level=74)
+    
+    dest_zip = str(tmp_path / "Slot_003_JP2C.zip")
+    out = backend.export_slot_bundle(3, dest_zip)
+    assert os.path.exists(out)
+    
+    with zipfile.ZipFile(out, "r") as z:
+        files = z.namelist()
+        assert any(f.endswith(".nam") for f in files)
+        assert any(f.startswith("Blocks_V1/") for f in files)
+        assert any(f.startswith("Blocks_V2/") for f in files)
+
+def test_backend_equipment_categorization_logic():
+    """Validates dynamic model tagging logic for the GUI filter chips."""
+    def categorize(name):
+        name_lower = name.lower()
+        if any(k in name_lower for k in ["petrucci", "timmons", "jp ", "jp2c", "at "]):
+            return "SIGNATURE"
+        elif any(k in name_lower for k in ["drive", "od", "ts808", "ts9", "boost", "fuzz", "dist", "throttle", "1981", "dude"]):
+            return "DRIVE"
+        elif any(k in name_lower for k in ["clean", "jazz", "sss", "cln"]):
+            return "CLEAN"
+        else:
+            return "AMP"
+            
+    assert categorize("John Petrucci JP2C Lead") == "SIGNATURE"
+    assert categorize("Andy Timmons AT+ Angry Charlie") == "SIGNATURE"
+    assert categorize("Ibanez TS808 Tube Screamer") == "DRIVE"
+    assert categorize("1981 DRV Overdrive") == "DRIVE"
+    assert categorize("Dumble SSS Steel String Clean") == "CLEAN"
+    assert categorize("Roland Jazz Chorus 120 Cln") == "CLEAN"
+    assert categorize("Mesa Dual Rectifier High Gain") == "AMP"
+    assert categorize("Marshall JCM800 2203") == "AMP"

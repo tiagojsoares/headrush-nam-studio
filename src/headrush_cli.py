@@ -59,7 +59,7 @@ def cmd_install(args):
     print(f"[OK] Successfully installed to slot {res['slot']:03d}!")
     print(f"  NAM File:   {res['nam_file']}")
     print(f"  Preset:     {res['preset_name']}.block (Drive={res['slot']}, Tone={tone}, Level={level})")
-    print(f"  Block Path: {res['block_path']}")
+    print(f"  Block Paths: {', '.join(res.get('block_paths', []))}")
 
 def cmd_search(args):
     q = args.query

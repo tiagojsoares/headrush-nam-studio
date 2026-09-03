@@ -121,8 +121,9 @@ class HeadRushBackend:
         paths = hm.create_block_preset(slot_num, preset_name, tone=tone, level=level)
         return paths[0] if paths else None
 
-    def install_model(self, src_path, preset_name=None, slot=None, tone=50, level=70):
-        return hm.install_nam_to_headrush(src_path, custom_name=preset_name, slot=slot, tone=tone, level=level)
+    def install_model(self, src_path, preset_name=None, slot=None, tone=50, level=70, custom_name=None):
+        final_name = preset_name or custom_name
+        return hm.install_nam_to_headrush(src_path, custom_name=final_name, slot=slot, tone=tone, level=level)
 
     def delete_slot(self, slot_num):
         return hm.delete_slot(slot_num)
