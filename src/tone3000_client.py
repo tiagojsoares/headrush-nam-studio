@@ -152,12 +152,33 @@ class Tone3000Client:
 
     def get_tone(self, tone_id):
         """Fetch full details for a single tone by ID."""
-        return self._request(f"/tones/{tone_id}")
-
     def get_tone_models(self, tone_id):
-        """Fetch all individual models/captures for a specific tone."""
-        res = self._request("/models", {"tone_id": tone_id})
-        return res.get("data", []) if isinstance(res, dict) else res
+        """
+        Fetch all individual models/captures for a specific tone across all architectures
+        (A2 Slim, NAM v1, Custom, and IRs).
+        """
+        models = []
+        seen_ids = set()
+
+        # Query A2 first (recommended for modern DSP units like MX5), then v1, then custom, then default
+        for arch in ['2', '1', 'custom', None]:
+            params = {"tone_id": tone_id}
+            if arch is not None:
+                params["architecture"] = arch
+            try:
+                res = self._request("/models", params)
+                data = res.get("data", []) if isinstance(res, dict) else res
+                for m in data:
+                    mid = m.get("id")
+                    if mid and mid not in seen_ids:
+                        seen_ids.add(mid)
+                        if not m.get("architecture_version") and arch:
+                            m["architecture_version"] = arch
+                        models.append(m)
+            except Exception:
+                continue
+
+        return models
 
     def download_model(self, model_url, dest_path=None):
         """

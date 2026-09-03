@@ -1544,7 +1544,11 @@ class HeadRushApp(ctk.CTk):
         creator = (tone_obj.get("user") or {}).get("username") or "Comunidade"
         likes = tone_obj.get("favorites_count", 0)
         dls = tone_obj.get("downloads_count", 0)
-        models_count = tone_obj.get("models_count", 1)
+        models_count = (
+            tone_obj.get("models_count") or
+            (tone_obj.get("a2_models_count", 0) + tone_obj.get("a1_models_count", 0) + tone_obj.get("custom_models_count", 0)) or
+            1
+        )
 
         desc_lbl = ctk.CTkLabel(
             info_box,
@@ -1617,13 +1621,40 @@ class HeadRushApp(ctk.CTk):
                 row.pack(fill="x", pady=3, padx=2)
 
                 m_name = m.get("name", "Modelo NAM")
-                size = m.get("size", "Standard")
+                arch_ver = str(m.get("architecture_version") or "1")
+                if arch_ver == "2":
+                    arch_desc = "⚡ A2 SLIM (Ideal MX5)"
+                    tag_color = "#16a34a"
+                elif arch_ver == "custom":
+                    arch_desc = "Custom Architecture"
+                    tag_color = "#8b5cf6"
+                else:
+                    arch_desc = "NAM v1 Standard"
+                    tag_color = "#64748b"
+
+                size = m.get("size")
+                size_str = arch_desc + (f" · Tamanho: {size.capitalize()}" if size else "")
                 
                 info = ctk.CTkFrame(row, fg_color="transparent")
                 info.pack(side="left", fill="x", expand=True, padx=10, pady=8)
                 
-                ctk.CTkLabel(info, text=m_name, font=ctk.CTkFont(size=13, weight="bold"), text_color="#ffffff").pack(anchor="w")
-                ctk.CTkLabel(info, text=f"Tamanho/Arquitetura: {size}", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w")
+                title_line = ctk.CTkFrame(info, fg_color="transparent")
+                title_line.pack(anchor="w")
+
+                ctk.CTkLabel(title_line, text=m_name, font=ctk.CTkFont(size=13, weight="bold"), text_color="#ffffff").pack(side="left")
+                
+                badge_arch = ctk.CTkLabel(
+                    title_line,
+                    text=f" {arch_desc} ",
+                    font=ctk.CTkFont(size=9, weight="bold"),
+                    fg_color=tag_color,
+                    text_color="#ffffff",
+                    corner_radius=4,
+                    height=18
+                )
+                badge_arch.pack(side="left", padx=8)
+
+                ctk.CTkLabel(info, text=f"Formato: Neural Amp Modeler (.nam)", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w")
 
                 btn_inst = ctk.CTkButton(
                     row,

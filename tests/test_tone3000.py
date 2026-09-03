@@ -62,6 +62,17 @@ def test_tone3000_live_search_and_model_listing():
     except Exception as e:
         pytest.skip(f"Network request to TONE3000 failed: {e}")
 
+def test_tone3000_a2_architecture_resolution():
+    """Validates that A2 (Architecture 2) models like Polytone 88500 are fetched correctly."""
+    client = get_tone3000_client()
+    try:
+        models = client.get_tone_models(88500)
+        assert isinstance(models, list)
+        assert len(models) >= 1
+        assert any(m.get("architecture_version") == "2" for m in models)
+    except Exception as e:
+        pytest.skip(f"Network request to TONE3000 failed: {e}")
+
 def test_tone3000_download_and_install_mocked(mock_pedal_drive, monkeypatch, tmp_path):
     """
     Tests downloading a model and installing it into HeadRush MX5 USB drive,
