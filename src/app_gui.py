@@ -10,6 +10,19 @@ from datetime import datetime
 import string
 import ctypes
 
+# Robust module resolution for frozen executable and source scripts
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _CURRENT_DIR not in sys.path:
+    sys.path.insert(0, _CURRENT_DIR)
+
+if getattr(sys, 'frozen', False):
+    _BUNDLE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    if _BUNDLE_DIR not in sys.path:
+        sys.path.insert(0, _BUNDLE_DIR)
+    _SRC_BUNDLE = os.path.join(_BUNDLE_DIR, "src")
+    if os.path.exists(_SRC_BUNDLE) and _SRC_BUNDLE not in sys.path:
+        sys.path.insert(0, _SRC_BUNDLE)
+
 try:
     import customtkinter as ctk
     from tkinter import messagebox, filedialog
@@ -21,9 +34,16 @@ except ImportError:
 try:
     import headrush_manager as hm
 except ImportError:
-    # Handle if running from different working directory
-    sys.path.insert(0, os.path.dirname(__file__))
-    import headrush_manager as hm
+    try:
+        from src import headrush_manager as hm
+    except ImportError:
+        import importlib.util
+        hm_path = os.path.join(_CURRENT_DIR, "headrush_manager.py")
+        if not os.path.exists(hm_path) and getattr(sys, 'frozen', False):
+            hm_path = os.path.join(getattr(sys, '_MEIPASS', ''), "headrush_manager.py")
+        spec = importlib.util.spec_from_file_location("headrush_manager", hm_path)
+        hm = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hm)
 
 # App Configuration
 ctk.set_appearance_mode("Dark")
