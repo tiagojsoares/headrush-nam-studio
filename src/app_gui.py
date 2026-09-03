@@ -1125,7 +1125,20 @@ class HeadRushApp(ctk.CTk):
             hover_color="#0369a1",
             command=lambda: self.do_cloud_search(mode="search")
         )
-        btn_search.pack(side="left", padx=(4, 12), pady=10)
+        btn_search.pack(side="left", padx=(4, 4), pady=10)
+
+        # API Keys Button
+        btn_keys = ctk.CTkButton(
+            search_frame,
+            text="🔑 Chaves API",
+            width=110,
+            height=36,
+            font=ctk.CTkFont(size=12),
+            fg_color="#334155",
+            hover_color="#475569",
+            command=self.show_api_keys_dialog
+        )
+        btn_keys.pack(side="left", padx=(4, 12), pady=10)
         
         # Quick Tags Bar
         tags_bar = ctk.CTkFrame(self.tab_catalog, fg_color="transparent")
@@ -1150,6 +1163,63 @@ class HeadRushApp(ctk.CTk):
         
         # Initial search: Load trending models
         self.do_cloud_search(mode="trending")
+
+    def show_api_keys_dialog(self):
+        from tone3000_client import get_tone3000_client
+        client = get_tone3000_client()
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Credenciais TONE3000 API")
+        dlg.geometry("520x360")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        ctk.CTkLabel(
+            dlg,
+            text="🔑 Configuração Segura TONE3000",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#38bdf8"
+        ).pack(anchor="w", padx=20, pady=(16, 4))
+
+        ctk.CTkLabel(
+            dlg,
+            text="Suas chaves são salvas APENAS localmente no seu computador\n(~/.headrush_nam_studio/config.json) e NUNCA incluídas no código ou Git.",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+            justify="left"
+        ).pack(anchor="w", padx=20, pady=(0, 12))
+
+        ctk.CTkLabel(dlg, text="Public Key (client_id):", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        ent_pub = ctk.CTkEntry(dlg, height=32, font=ctk.CTkFont(size=12))
+        ent_pub.pack(fill="x", padx=20, pady=(0, 8))
+        ent_pub.insert(0, client.public_key or "")
+
+        ctk.CTkLabel(dlg, text="Secret Key (t3k_cs_...):", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=20, pady=(4, 2))
+        ent_sec = ctk.CTkEntry(dlg, height=32, font=ctk.CTkFont(size=12), show="•")
+        ent_sec.pack(fill="x", padx=20, pady=(0, 16))
+        ent_sec.insert(0, client.secret_key or "")
+
+        def _save():
+            p_key = ent_pub.get().strip()
+            s_key = ent_sec.get().strip()
+            if s_key and not s_key.startswith("t3k_cs_"):
+                messagebox.showwarning("Formato Inválido", "A Secret Key do TONE3000 deve começar com 't3k_cs_'")
+                return
+            client.save_credentials(public_key=p_key, secret_key=s_key)
+            dlg.destroy()
+            messagebox.showinfo("Salvo com Sucesso", "Suas credenciais foram salvas com segurança no seu computador!")
+            self.do_cloud_search(mode="trending")
+
+        btn_save = ctk.CTkButton(
+            dlg,
+            text="💾 Salvar Credenciais",
+            height=36,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="#16a34a",
+            hover_color="#15803d",
+            command=_save
+        )
+        btn_save.pack(pady=10)
 
     def _on_mode_change(self, val):
         if "Trending" in val:

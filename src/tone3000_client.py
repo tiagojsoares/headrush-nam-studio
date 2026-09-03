@@ -6,14 +6,15 @@ import urllib.error
 import headrush_manager as hm
 
 CONFIG_PATH = os.path.expanduser("~/.headrush_nam_studio/config.json")
-DEFAULT_PUB_KEY = "t3k_pub_KxNHvuICOK3oahPJJAcd89Zoom8K4xIt"
-DEFAULT_SEC_KEY = "t3k_cs_e2c9f2be0165bd63_09985df427dd6d623af4647d76213993fbee2640598868a4"
+DEFAULT_PUB_KEY = ""
+DEFAULT_SEC_KEY = ""
 BASE_URL = "https://www.tone3000.com/api/v1"
 
 class Tone3000Client:
     def __init__(self, public_key=None, secret_key=None):
-        self.public_key = public_key or os.environ.get("TONE3000_PUBLIC_KEY") or self._load_config().get("public_key") or DEFAULT_PUB_KEY
-        self.secret_key = secret_key or os.environ.get("TONE3000_SECRET_KEY") or self._load_config().get("secret_key") or DEFAULT_SEC_KEY
+        config = self._load_config()
+        self.public_key = public_key or os.environ.get("TONE3000_PUBLIC_KEY") or config.get("public_key") or DEFAULT_PUB_KEY
+        self.secret_key = secret_key or os.environ.get("TONE3000_SECRET_KEY") or config.get("secret_key") or DEFAULT_SEC_KEY
         self.user_agent = "HeadRushNAMStudio/1.2"
 
     def _load_config(self):
@@ -42,8 +43,14 @@ class Tone3000Client:
         except Exception:
             return False
 
+    def is_configured(self):
+        return bool(self.secret_key and self.secret_key.strip())
+
     def _request(self, endpoint, params=None):
         """Internal helper to make authenticated HTTP GET requests to TONE3000 API."""
+        if not self.secret_key:
+            raise Exception("Chave da API TONE3000 não configurada. Clique em '🔑 Chaves API' para salvar sua Secret Key com segurança.")
+            
         url = f"{BASE_URL}{endpoint}"
         if params:
             query_str = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
