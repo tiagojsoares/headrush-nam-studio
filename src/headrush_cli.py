@@ -11,15 +11,12 @@ try:
 except:
     pass
 
-DB_PATH = "c:/VM/TONE3000_NAM_Library/tone3000.db"
-LIBRARY_DIR = "c:/VM/TONE3000_NAM_Library"
-
 def cmd_list(args):
     print("\n=======================================================")
     print(" 🎸 HEADRUSH MX5 · INSTALLED NAM MODELS & BLOCK PRESETS")
     print("=======================================================")
     if not hm.is_headrush_connected():
-        print("[!] HeadRush MX5 drive E: not detected.")
+        print("[!] HeadRush MX5 drive not detected.")
         return
         
     slots = hm.get_installed_slots()
@@ -38,13 +35,10 @@ def cmd_list(args):
 
 def cmd_install(args):
     if not hm.is_headrush_connected():
-        print("[!] HeadRush MX5 drive E: not detected.")
+        print("[!] HeadRush MX5 drive not detected.")
         return
         
-    nam_path = args.path
-    if not os.path.isabs(nam_path):
-        nam_path = os.path.join(LIBRARY_DIR, nam_path)
-        
+    nam_path = os.path.abspath(args.path)
     if not os.path.exists(nam_path):
         print(f"[!] File not found: {nam_path}")
         return
@@ -63,36 +57,21 @@ def cmd_install(args):
 
 def cmd_search(args):
     q = args.query
-    arch_filter = getattr(args, 'arch', 'all')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    
-    sql = '''
-        SELECT m.id, m.name, t.title, COALESCE(u.username, u.display_name, 'Community'), m.architecture_version, m.local_path
-        FROM models_fts fts
-        JOIN models m ON fts.model_id = m.id
-        JOIN tones t ON m.tone_id = t.id
-        LEFT JOIN users u ON t.user_id = u.id
-        WHERE models_fts MATCH ?
-    '''
-    params = [f'"{q}"*']
-    if arch_filter and arch_filter != 'all':
-        sql += ' AND m.architecture_version = ?'
-        params.append(arch_filter)
-        
-    sql += ' LIMIT 20'
-    cur.execute(sql, params)
-    rows = cur.fetchall()
-    conn.close()
-    
-    print(f"\nSearch results for '{q}' [Arch: {arch_filter}] ({len(rows)} shown):")
-    print("-" * 90)
-    for r in rows:
-        m_id, m_name, t_title, creator, arch, lpath = r
-        arch_tag = "[A2]" if arch == '2' else "[v1]"
-        print(f"ID {m_id:6d} | {arch_tag:<4} | {m_name:<30} | Pack: {t_title:<25} | By: {creator}")
-        print(f"   Path: {lpath}")
+    print(f"\nSearching TONE3000 Cloud for '{q}'...")
+    try:
+        res = hm.cloud_search_tones(query=q)
+        tones = res.get("tones", [])
+        print(f"\nFound {len(tones)} results on TONE3000 Cloud:")
+        print("-" * 90)
+        for t in tones:
+            tid = t.get("id")
+            title = t.get("title") or t.get("name") or "Untitled"
+            gear = t.get("gear", "amp").upper()
+            author = (t.get("user") or {}).get("username") or "Community"
+            models_cnt = t.get("models_count", 1)
+            print(f"[{gear:<6}] ID: {tid:<6} | {title:<35} | Author: {author:<15} | Models: {models_cnt}")
+    except Exception as e:
+        print(f"[!] Cloud search error: {e}")
 
 def cmd_irs(args):
     if not hm.is_headrush_connected():

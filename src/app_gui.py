@@ -49,9 +49,6 @@ except ImportError:
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-DB_PATH = "c:/VM/TONE3000_NAM_Library/tone3000.db"
-LIBRARY_DIR = "c:/VM/TONE3000_NAM_Library"
-
 def get_available_drives():
     """Returns a list of drive letters currently mounted on Windows."""
     drives = []
