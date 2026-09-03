@@ -27,12 +27,24 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install Dependencies
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+
+      - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Run Pytest Tests
+      - name: Run Pytest Tests (Windows)
+        if: runner.os == 'Windows'
         run: |
           pytest -v
+
+      - name: Run Pytest Tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a pytest -v

@@ -7,6 +7,13 @@
 #define MyAppURL "https://github.com/tiagojsoares/headrush-nam-studio"
 #define MyAppExeName "HeadRush_NAM_Studio_Pro.exe"
 
+#ifndef SourceExePath
+  #define SourceExePath "C:\VM\HeadRush_NAM_Studio_Pro.exe"
+#endif
+#ifndef OutputDir
+  #define OutputDir "C:\VM"
+#endif
+
 [Setup]
 AppId={{E8D79A22-3C4B-4E89-9A82-D08B48B925C1}
 AppName={#MyAppName}
@@ -18,7 +25,7 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir=C:\VM
+OutputDir={#OutputDir}
 OutputBaseFilename=HeadRush_NAM_Studio_Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -40,7 +47,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "C:\VM\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceExePath}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

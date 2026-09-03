@@ -34,6 +34,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pyinstaller
+          choco install innosetup --no-progress -y
 
       - name: Run Test Suite Before Build
         run: |
@@ -41,7 +42,11 @@ jobs:
 
       - name: Build Standalone Windows Executable (.exe)
         run: |
-          pyinstaller --noconsole --onefile --name "HeadRush_NAM_Studio" --paths src --hidden-import app_gui --hidden-import headrush_manager --hidden-import headrush_cli --collect-all customtkinter --distpath dist main.py --clean -y
+          pyinstaller --noconsole --onefile --name "HeadRush_NAM_Studio" --paths src --hidden-import app_gui --hidden-import headrush_manager --hidden-import headrush_cli --hidden-import tone3000_client --add-data "src/headrush_manager.py;." --add-data "src/tone3000_client.py;." --add-data "src/headrush_manager.py;src" --add-data "src/tone3000_client.py;src" --collect-all customtkinter --distpath dist main.py --clean -y
+
+      - name: Build Official Windows Installer via Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSourceExePath="dist\HeadRush_NAM_Studio.exe" /DOutputDir="dist" headrush_setup.iss
 
       - name: Create ZIP Package
         run: |
@@ -68,6 +73,7 @@ jobs:
           generate_release_notes: true
           files: |
             dist/HeadRush_NAM_Studio.exe
+            dist/HeadRush_NAM_Studio_Setup.exe
             dist/HeadRush_NAM_Studio_Windows_x64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -52,11 +52,17 @@ ctk.set_default_color_theme("blue")
 def get_available_drives():
     """Returns a list of drive letters currently mounted on Windows."""
     drives = []
-    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
-    for letter in string.ascii_uppercase:
-        if bitmask & 1:
-            drives.append(f"{letter}:")
-        bitmask >>= 1
+    if sys.platform == "win32" and hasattr(ctypes, "windll"):
+        try:
+            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+            for letter in string.ascii_uppercase:
+                if bitmask & 1:
+                    drives.append(f"{letter}:")
+                bitmask >>= 1
+        except Exception:
+            pass
+    if not drives:
+        drives = ["E:"]
     return drives
 
 def detect_headrush_drive():
