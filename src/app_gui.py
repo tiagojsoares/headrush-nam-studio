@@ -203,6 +203,21 @@ class HeadRushBackend:
     def perform_health_check(self):
         return hm.perform_health_check()
 
+    def cloud_search(self, query="", gear=None, page=1):
+        return hm.cloud_search_tones(query=query, gear=gear, page=page)
+
+    def cloud_trending(self, gear=None):
+        return hm.cloud_get_trending(gear=gear)
+
+    def cloud_latest(self, gear=None):
+        return hm.cloud_get_latest(gear=gear)
+
+    def cloud_models(self, tone_id):
+        return hm.cloud_get_tone_models(tone_id)
+
+    def cloud_install(self, model_obj, slot=None, custom_name=None, tone=50, level=70):
+        return hm.cloud_download_and_install(model_obj, slot=slot, custom_name=custom_name, tone=tone, level=level)
+
 class HeadRushApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -1062,42 +1077,42 @@ class HeadRushApp(ctk.CTk):
             self.refresh_installed_slots()
 
     # ====================================================================
-    # TAB 2: TONE3000 CATALOG
+    # TAB 2: TONE3000 CLOUD EXPLORER (LIVE REST API)
     # ====================================================================
     def setup_catalog_tab(self):
-        # Search controls frame
+        # Top control bar
         search_frame = ctk.CTkFrame(self.tab_catalog, fg_color="#1e1e24", corner_radius=8)
         search_frame.pack(fill="x", padx=10, pady=8)
         
         # Search entry
         self.ent_search = ctk.CTkEntry(
             search_frame,
-            placeholder_text="🔍 Busque por amplificador, pedal, artista (ex: 5150, Dumble, Petrucci, Klon, Bogner)...",
+            placeholder_text="🔍 Busque timbres na nuvem TONE3000 (ex: Mesa, Klon, 5150, Soldano, Friedman, Bass)...",
             height=36,
             font=ctk.CTkFont(size=13)
         )
         self.ent_search.pack(side="left", fill="x", expand=True, padx=(12, 6), pady=10)
-        self.ent_search.bind("<Return>", lambda e: self.do_search())
+        self.ent_search.bind("<Return>", lambda e: self.do_cloud_search(mode="search"))
         
-        # Category Filter
+        # Feed / Mode Selector
+        self.opt_mode = ctk.CTkOptionMenu(
+            search_frame,
+            values=["🔥 Em Alta (Trending)", "✨ Recentes (Latest)", "🔍 Busca Geral"],
+            width=170,
+            height=36,
+            command=self._on_mode_change
+        )
+        self.opt_mode.pack(side="left", padx=4, pady=10)
+
+        # Gear Filter
         self.opt_category = ctk.CTkOptionMenu(
             search_frame,
-            values=["Todos os Tipos", "Cabeçote / Amp", "Pedal de Drive", "Amp + Gabinete"],
+            values=["Todos os Tipos", "Cabeçote / Amp", "Pedal", "Amp + Gabinete", "Gabinete / IR"],
             width=140,
             height=36,
-            command=lambda v: self.do_search()
+            command=lambda v: self.do_cloud_search()
         )
         self.opt_category.pack(side="left", padx=4, pady=10)
-        
-        # Architecture Filter
-        self.opt_arch = ctk.CTkOptionMenu(
-            search_frame,
-            values=["Todas Arquiteturas", "A2 Slim (Recomendado MX5)", "v1 Standard"],
-            width=180,
-            height=36,
-            command=lambda v: self.do_search()
-        )
-        self.opt_arch.pack(side="left", padx=4, pady=10)
         
         # Search Button
         btn_search = ctk.CTkButton(
@@ -1106,7 +1121,9 @@ class HeadRushApp(ctk.CTk):
             width=90,
             height=36,
             font=ctk.CTkFont(size=13, weight="bold"),
-            command=self.do_search
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            command=lambda: self.do_cloud_search(mode="search")
         )
         btn_search.pack(side="left", padx=(4, 12), pady=10)
         
@@ -1114,7 +1131,7 @@ class HeadRushApp(ctk.CTk):
         tags_bar = ctk.CTkFrame(self.tab_catalog, fg_color="transparent")
         tags_bar.pack(fill="x", padx=10, pady=(0, 4))
         
-        quick_tags = ["5150", "Dumble", "Petrucci", "Andy Timmons", "1981 DRV", "Mesa Boogie", "Bogner", "Friedman", "Marshall", "Soldano", "Klon", "King of Tone", "TS808"]
+        quick_tags = ["Mesa Boogie", "Marshall", "Soldano", "Friedman", "5150", "Dumble", "Klon", "TS808", "Bogner", "Petrucci", "Bass", "King of Tone"]
         for tag in quick_tags:
             btn_tag = ctk.CTkButton(
                 tags_bar,
@@ -1131,211 +1148,327 @@ class HeadRushApp(ctk.CTk):
         self.catalog_scroll = ctk.CTkScrollableFrame(self.tab_catalog, fg_color="transparent")
         self.catalog_scroll.pack(fill="both", expand=True, padx=6, pady=4)
         
-        # Initial search
-        self.quick_search("Dumble")
+        # Initial search: Load trending models
+        self.do_cloud_search(mode="trending")
+
+    def _on_mode_change(self, val):
+        if "Trending" in val:
+            self.do_cloud_search(mode="trending")
+        elif "Recentes" in val or "Latest" in val:
+            self.do_cloud_search(mode="latest")
+        else:
+            self.do_cloud_search(mode="search")
 
     def quick_search(self, query):
         self.ent_search.delete(0, 'end')
         self.ent_search.insert(0, query)
-        self.do_search()
+        self.opt_mode.set("🔍 Busca Geral")
+        self.do_cloud_search(mode="search")
 
-    def do_search(self):
+    def do_cloud_search(self, mode=None):
+        if mode is None:
+            val = self.opt_mode.get()
+            if "Trending" in val:
+                mode = "trending"
+            elif "Recentes" in val or "Latest" in val:
+                mode = "latest"
+            else:
+                mode = "search"
+
         query = self.ent_search.get().strip()
-        if not query:
-            return
-            
-        for widget in self.catalog_scroll.winfo_children():
-            widget.destroy()
-            
-        if not os.path.exists(DB_PATH):
-            ctk.CTkLabel(
-                self.catalog_scroll,
-                text=f"Banco de dados Tone3000 não encontrado em:\n{DB_PATH}",
-                font=ctk.CTkFont(size=14),
-                text_color="#ef4444"
-            ).pack(pady=40)
-            return
+        if mode == "search" and not query:
+            query = "Mesa"
+            self.ent_search.insert(0, query)
 
         cat_choice = self.opt_category.get()
         cat_map = {
             "Cabeçote / Amp": "amp",
-            "Pedal de Drive": "pedal",
-            "Amp + Gabinete": "amp-cab"
+            "Pedal": "pedal",
+            "Amp + Gabinete": "amp-cab",
+            "Gabinete / IR": "cab"
         }
         target_gear = cat_map.get(cat_choice)
-        
-        arch_choice = self.opt_arch.get()
-        arch_filter = None
-        if "A2" in arch_choice:
-            arch_filter = '2'
-        elif "v1" in arch_choice:
-            arch_filter = '1'
 
+        for widget in self.catalog_scroll.winfo_children():
+            widget.destroy()
+
+        lbl_loading = ctk.CTkLabel(
+            self.catalog_scroll,
+            text="⏳ Conectando à nuvem TONE3000 e buscando timbres...",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#38bdf8"
+        )
+        lbl_loading.pack(pady=40)
+
+        threading.Thread(
+            target=self._fetch_cloud_tones_thread,
+            args=(query, target_gear, mode),
+            daemon=True
+        ).start()
+
+    def _fetch_cloud_tones_thread(self, query, gear, mode):
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
+            if mode == "trending":
+                tones = self.backend.cloud_trending(gear=gear)
+                title = "🔥 Timbres em Alta no TONE3000 (Mais Populares):"
+            elif mode == "latest":
+                tones = self.backend.cloud_latest(gear=gear)
+                title = "✨ Últimos Timbres Publicados pela Comunidade:"
+            else:
+                res = self.backend.cloud_search(query=query, gear=gear, page=1)
+                tones = res.get("tones", [])
+                total = res.get("total", len(tones))
+                title = f"🔍 Encontrados {total} resultados para '{query}':"
             
-            sql = '''
-                SELECT m.id, m.name, t.title, COALESCE(u.username, u.display_name, 'Community'),
-                       m.architecture_version, t.gear, m.local_path, t.description
-                FROM models_fts fts
-                JOIN models m ON fts.model_id = m.id
-                JOIN tones t ON m.tone_id = t.id
-                LEFT JOIN users u ON t.user_id = u.id
-                WHERE models_fts MATCH ?
-            '''
-            params = [f'"{query}"*']
-            
-            if target_gear:
-                sql += ' AND t.gear = ?'
-                params.append(target_gear)
-                
-            if arch_filter:
-                sql += ' AND m.architecture_version = ?'
-                params.append(arch_filter)
-                
-            sql += ' LIMIT 40'
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-            conn.close()
+            self.after(0, lambda: self._render_cloud_tones(tones, title))
         except Exception as e:
-            ctk.CTkLabel(
-                self.catalog_scroll,
-                text=f"Erro na consulta SQL: {e}",
-                text_color="#ef4444"
-            ).pack(pady=20)
-            return
+            err_msg = str(e)
+            self.after(0, lambda: self._render_cloud_error(err_msg))
 
-        if not rows:
+    def _render_cloud_error(self, err_msg):
+        for widget in self.catalog_scroll.winfo_children():
+            widget.destroy()
+            
+        ctk.CTkLabel(
+            self.catalog_scroll,
+            text=f"⚠️ Erro ao consultar a API TONE3000:\n{err_msg}\n\nVerifique sua conexão com a internet.",
+            font=ctk.CTkFont(size=13),
+            text_color="#ef4444"
+        ).pack(pady=40)
+
+    def _render_cloud_tones(self, tones, title_text):
+        for widget in self.catalog_scroll.winfo_children():
+            widget.destroy()
+
+        if not tones:
             ctk.CTkLabel(
                 self.catalog_scroll,
-                text=f"Nenhum modelo encontrado para '{query}'.\nTente buscar com termos mais gerais (ex: Marshall, Drive, Clean, Lead).",
+                text="Nenhum timbre encontrado para os filtros selecionados.\nTente outra busca ou selecione 'Em Alta'.",
                 font=ctk.CTkFont(size=14),
                 text_color="#71717a"
             ).pack(pady=40)
             return
-            
+
         summary_lbl = ctk.CTkLabel(
             self.catalog_scroll,
-            text=f"Mostrando {len(rows)} melhores resultados para '{query}':",
+            text=f"{title_text} ({len(tones)} exibidos)",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#38bdf8",
             anchor="w"
         )
         summary_lbl.pack(fill="x", padx=8, pady=4)
-        
+
         installed_slots = self.backend.get_installed_slots()
         installed_names = {info.get('preset_name', '').lower(): s for s, info in installed_slots.items()}
-        
-        for r in rows:
-            m_id, m_name, t_title, creator, a_ver, gear, rel_path, desc = r
-            is_installed = m_name.lower() in installed_names
-            installed_slot = installed_names.get(m_name.lower())
-            self.create_catalog_card(m_id, m_name, t_title, creator, a_ver, gear, rel_path, is_installed, installed_slot)
 
-    def create_catalog_card(self, m_id, m_name, t_title, creator, a_ver, gear, rel_path, is_installed=False, installed_slot=None):
+        for t in tones:
+            self.create_cloud_tone_card(t, installed_names)
+
+    def create_cloud_tone_card(self, tone_obj, installed_names):
         card = ctk.CTkFrame(self.catalog_scroll, fg_color="#18181b", corner_radius=8)
         card.pack(fill="x", pady=4, padx=4)
+
+        # Gear tag
+        gear = tone_obj.get("gear", "amp")
+        gear_color = "#3b82f6" if gear in ["amp", "amp-cab"] else "#8b5cf6"
+        gear_label = {"amp": "AMP", "pedal": "PEDAL", "amp-cab": "RIG", "cab": "CAB/IR"}.get(gear, gear.upper())
         
-        # Arch tag
-        arch_color = "#16a34a" if a_ver == '2' else "#4b5563"
-        arch_text = "A2 SLIM" if a_ver == '2' else "NAM v1"
-        arch_badge = ctk.CTkLabel(
+        gear_badge = ctk.CTkLabel(
             card,
-            text=arch_text,
+            text=gear_label,
             font=ctk.CTkFont(size=10, weight="bold"),
-            fg_color=arch_color,
+            fg_color=gear_color,
             text_color="#ffffff",
             corner_radius=4,
-            width=60,
+            width=64,
             height=22
         )
-        arch_badge.pack(side="left", padx=10, pady=10)
-        
+        gear_badge.pack(side="left", padx=10, pady=10)
+
         # Info Box
         info_box = ctk.CTkFrame(card, fg_color="transparent")
         info_box.pack(side="left", fill="x", expand=True, padx=8)
-        
+
         title_box = ctk.CTkFrame(info_box, fg_color="transparent")
         title_box.pack(anchor="w")
-        
+
+        title_text = tone_obj.get("title") or tone_obj.get("name") or "Sem Título"
         title_lbl = ctk.CTkLabel(
             title_box,
-            text=m_name,
+            text=title_text[:40],
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color="#ffffff"
         )
         title_lbl.pack(side="left")
-        
-        if is_installed:
-            inst_badge = ctk.CTkLabel(
-                title_box,
-                text=f"✓ Instalado (Slot {installed_slot:03d})",
-                font=ctk.CTkFont(size=10, weight="bold"),
-                fg_color="#065f46",
-                text_color="#a7f3d0",
-                corner_radius=4,
-                width=120,
-                height=18
-            )
-            inst_badge.pack(side="left", padx=8)
-        
-        gear_pt = {"amp": "Cabeçote", "pedal": "Pedal", "amp-cab": "Amp + Caixa", "outboard": "Outboard"}.get(gear, gear)
+
+        # Author and metrics
+        creator = (tone_obj.get("user") or {}).get("username") or "Comunidade"
+        likes = tone_obj.get("favorites_count", 0)
+        dls = tone_obj.get("downloads_count", 0)
+        models_count = tone_obj.get("models_count", 1)
+
         desc_lbl = ctk.CTkLabel(
             info_box,
-            text=f"Pacote: {t_title}  ·  Criador: {creator}  ·  Tipo: {gear_pt}",
+            text=f"Por: {creator}  ·  ❤️ {likes} likes  ·  ⬇️ {dls} downloads  ·  📦 {models_count} captura(s)",
             font=ctk.CTkFont(size=11),
             text_color="#a1a1aa",
             anchor="w"
         )
         desc_lbl.pack(anchor="w")
-        
-        # Install Button Box
+
+        # Action Buttons
         btn_box = ctk.CTkFrame(card, fg_color="transparent")
         btn_box.pack(side="right", padx=12, pady=10)
-        
-        btn_send = ctk.CTkButton(
+
+        tone_id = tone_obj.get("id")
+        btn_inspect = ctk.CTkButton(
             btn_box,
-            text="⚡ Enviar p/ MX5",
-            width=130,
+            text=f"⚡ Ver Capturas ({models_count})",
+            width=150,
             height=32,
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#0284c7",
             hover_color="#0369a1",
-            command=lambda p=rel_path, n=m_name: self.install_model_action(p, n)
+            command=lambda tid=tone_id, tobj=tone_obj: self.show_tone_models_dialog(tid, tobj)
         )
-        btn_send.pack(side="left", padx=2)
+        btn_inspect.pack(side="left", padx=2)
 
-    def install_model_action(self, rel_path, model_name):
+    def show_tone_models_dialog(self, tone_id, tone_obj):
+        """Displays modal with all captures/models inside a tone for selective installation."""
+        dlg = ctk.CTkToplevel(self)
+        dlg.title(f"Capturas NAM · {tone_obj.get('title', '')[:30]}")
+        dlg.geometry("640x480")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        top_f = ctk.CTkFrame(dlg, fg_color="#1e1e24", corner_radius=0)
+        top_f.pack(fill="x", padx=0, pady=0)
+        ctk.CTkLabel(
+            top_f,
+            text=f"📦 {tone_obj.get('title', 'Pacote')}",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color="#38bdf8"
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+        
+        desc = (tone_obj.get("description") or "").replace("\n", " ")[:120]
+        if desc:
+            ctk.CTkLabel(top_f, text=desc, font=ctk.CTkFont(size=11), text_color="#94a3b8", wraplength=600).pack(anchor="w", padx=16, pady=(0, 10))
+
+        scroll = ctk.CTkScrollableFrame(dlg, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=12, pady=10)
+
+        lbl_loading = ctk.CTkLabel(scroll, text="Carregando modelos do servidor...", font=ctk.CTkFont(size=13), text_color="#38bdf8")
+        lbl_loading.pack(pady=20)
+
+        def _fetch():
+            try:
+                models = self.backend.cloud_models(tone_id)
+                self.after(0, lambda: _render(models))
+            except Exception as e:
+                self.after(0, lambda: lbl_loading.configure(text=f"Erro ao carregar modelos: {e}", text_color="#ef4444"))
+
+        def _render(models):
+            lbl_loading.destroy()
+            if not models:
+                ctk.CTkLabel(scroll, text="Nenhum arquivo NAM disponível para este pacote.", text_color="#94a3b8").pack(pady=20)
+                return
+
+            for m in models:
+                row = ctk.CTkFrame(scroll, fg_color="#1e1e24", corner_radius=6)
+                row.pack(fill="x", pady=3, padx=2)
+
+                m_name = m.get("name", "Modelo NAM")
+                size = m.get("size", "Standard")
+                
+                info = ctk.CTkFrame(row, fg_color="transparent")
+                info.pack(side="left", fill="x", expand=True, padx=10, pady=8)
+                
+                ctk.CTkLabel(info, text=m_name, font=ctk.CTkFont(size=13, weight="bold"), text_color="#ffffff").pack(anchor="w")
+                ctk.CTkLabel(info, text=f"Tamanho/Arquitetura: {size}", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w")
+
+                btn_inst = ctk.CTkButton(
+                    row,
+                    text="⚡ Instalar no MX5",
+                    width=130,
+                    height=28,
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    fg_color="#16a34a",
+                    hover_color="#15803d",
+                    command=lambda mobj=m, dlg_ref=dlg: self._install_cloud_model(mobj, dlg_ref)
+                )
+                btn_inst.pack(side="right", padx=10, pady=8)
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _install_cloud_model(self, model_obj, dlg_ref=None):
         if not self.backend.is_connected():
-            messagebox.showerror("Erro", "A HeadRush MX5 não está conectada ou a unidade está incorreta.")
+            messagebox.showerror("HeadRush Desconectada", "Conecte sua HeadRush MX5 via USB em modo de transferência para instalar.")
             return
-            
+
         next_slot = self.backend.get_next_free_slot()
         if next_slot is None:
-            messagebox.showwarning("Limite Atingido", "Todos os 101 slots estão ocupados! Exclua algum timbre antes.")
+            messagebox.showwarning("Pedaleira Cheia", "Todos os 101 slots (000-100) da sua HeadRush estão ocupados! Exclua algum timbre antes.")
             return
-            
-        full_path = os.path.join(LIBRARY_DIR, rel_path.replace('/', os.sep))
-        if not os.path.exists(full_path):
-            messagebox.showerror("Arquivo não encontrado", f"Não foi possível localizar o arquivo no disco:\n{full_path}")
+
+        m_name = model_obj.get("name", "Cloud Tone")
+        
+        # Prompt slot/trim adjustment or install directly
+        res_confirm = messagebox.askyesno(
+            "Instalar Timbre da Nuvem",
+            f"Deseja baixar e instalar '{m_name}' no Slot {next_slot:03d} da sua HeadRush MX5?\n\n"
+            f"• Nome no Display: {self.backend.smart_format_preset_name(m_name, 24)}\n"
+            f"• Bloco ANXIETY OD V2 sincronizado automaticamente."
+        )
+        if not res_confirm:
             return
-            
-        try:
-            res = self.backend.install_model(full_path, preset_name=model_name, slot=next_slot)
+
+        if dlg_ref:
+            dlg_ref.destroy()
+
+        # Run background installation
+        prog_win = ctk.CTkToplevel(self)
+        prog_win.title("Baixando e Instalando...")
+        prog_win.geometry("380x140")
+        prog_win.transient(self)
+        prog_win.grab_set()
+
+        lbl_status = ctk.CTkLabel(prog_win, text=f"Baixando '{m_name}'\nda nuvem TONE3000...", font=ctk.CTkFont(size=13))
+        lbl_status.pack(pady=(20, 10))
+        prog_bar = ctk.CTkProgressBar(prog_win, mode="indeterminate", width=280)
+        prog_bar.pack(pady=5)
+        prog_bar.start()
+
+        def _worker():
+            try:
+                res = self.backend.cloud_install(
+                    model_obj=model_obj,
+                    slot=next_slot,
+                    custom_name=m_name,
+                    tone=50,
+                    level=70
+                )
+                self.after(0, lambda: _on_success(res, prog_win))
+            except Exception as e:
+                err_str = str(e)
+                self.after(0, lambda: _on_error(err_str, prog_win))
+
+        def _on_success(res, win):
+            win.destroy()
+            self.refresh_installed_slots()
             messagebox.showinfo(
                 "Instalação Concluída! 🚀",
-                f"Timbre instalado com sucesso no Slot {res['slot']:03d}!\n\n"
-                f"⚠️ ATENÇÃO - PASSO OBRIGATÓRIO ⚠️\n"
-                f"Como você adicionou novos arquivos, a HeadRush MX5 NÃO VAI reconhecê-los até você REINICIAR a pedaleira.\n\n"
-                f"Passo a Passo:\n"
-                f"1. Desconecte o cabo USB (ou saia do modo USB Transfer)\n"
-                f"2. Desligue a HeadRush no botão e ligue novamente.\n"
-                f"3. Vá no seu Rig, adicione o pedal Anxiety OD V2 e carregue o preset '{res['preset_name']}'!"
+                f"Timbre baixado e instalado com sucesso!\n\n"
+                f"• Slot HeadRush: {res['slot']:03d}\n"
+                f"• Nome no LCD: {res['preset_name']}\n"
+                f"• Bloco V1 e V2 criados com sucesso!\n\n"
+                f"Lembre-se de reiniciar sua MX5 para que ela recarregue os novos blocos."
             )
-            self.refresh_installed_slots()
-        except Exception as e:
-            messagebox.showerror("Erro ao Instalar", str(e))
+
+        def _on_error(err_str, win):
+            win.destroy()
+            messagebox.showerror("Falha no Download/Instalação", f"Não foi possível instalar o modelo da nuvem:\n{err_str}")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ====================================================================
     # TAB 3: IMPULSE RESPONSES

@@ -1299,4 +1299,40 @@ def perform_health_check():
         "summary": f"{score}% Saudável - {valid_nams} modelos instalados."
     }
 
+# ====================================================================
+# TONE3000 CLOUD INTEGRATION WRAPPERS
+# ====================================================================
+
+def cloud_search_tones(query="", gear=None, format_type="nam", page=1, page_size=20):
+    """Search community tones on TONE3000 Cloud."""
+    from tone3000_client import get_tone3000_client
+    return get_tone3000_client().search_tones(query=query, gear=gear, format_type=format_type, page=page, page_size=page_size)
+
+def cloud_get_trending(gear=None):
+    """Get trending tones on TONE3000 Cloud."""
+    from tone3000_client import get_tone3000_client
+    return get_tone3000_client().get_trending(gear=gear)
+
+def cloud_get_latest(gear=None):
+    """Get latest published tones on TONE3000 Cloud."""
+    from tone3000_client import get_tone3000_client
+    return get_tone3000_client().get_latest(gear=gear)
+
+def cloud_get_tone_models(tone_id):
+    """Get individual models / captures for a specific tone on TONE3000 Cloud."""
+    from tone3000_client import get_tone3000_client
+    return get_tone3000_client().get_tone_models(tone_id)
+
+def cloud_download_and_install(model_obj, slot=None, custom_name=None, tone=50, level=70):
+    """Download a model from TONE3000 and install it directly into HeadRush MX5."""
+    from tone3000_client import get_tone3000_client
+    return get_tone3000_client().download_and_install_to_headrush(
+        model_obj=model_obj,
+        slot=slot,
+        custom_name=custom_name,
+        tone=tone,
+        level=level
+    )
+
+
 

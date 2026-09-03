@@ -253,6 +253,82 @@ def cmd_setlist(args):
         dest = hm.import_setlist_zip(args.source)
         print(f"[OK] Setlist imported successfully from: {args.source}")
 
+def cmd_cloud(args):
+    action = args.cloud_action
+    if action == "search":
+        print(f"\n🔍 Searching TONE3000 Cloud for '{args.query}'...")
+        res = hm.cloud_search_tones(query=args.query, gear=args.gear, page=args.page)
+        tones = res.get("tones", [])
+        print(f"Found {res.get('total', len(tones))} results (Page {res.get('page', 1)}/{res.get('total_pages', 1)}):\n")
+        print(f"{'Tone ID':<10} | {'Title':<30} | {'Gear':<8} | {'Models':<6} | {'Author':<15}")
+        print("-" * 75)
+        for t in tones:
+            author = (t.get("user") or {}).get("username", "Unknown")
+            print(f"{t.get('id', ''):<10} | {t.get('title', '')[:30]:<30} | {t.get('gear', ''):<8} | {t.get('models_count', 0):<6} | {author[:15]:<15}")
+    elif action == "trending":
+        print("\n🔥 Top Trending Tones on TONE3000 Cloud:\n")
+        tones = hm.cloud_get_trending(gear=args.gear)
+        print(f"{'Tone ID':<10} | {'Title':<30} | {'Gear':<8} | {'Likes':<6} | {'Downloads':<10}")
+        print("-" * 75)
+        for t in tones:
+            print(f"{t.get('id', ''):<10} | {t.get('title', '')[:30]:<30} | {t.get('gear', ''):<8} | {t.get('favorites_count', 0):<6} | {t.get('downloads_count', 0):<10}")
+    elif action == "latest":
+        print("\n✨ Latest Community Tones on TONE3000 Cloud:\n")
+        tones = hm.cloud_get_latest(gear=args.gear)
+        print(f"{'Tone ID':<10} | {'Title':<30} | {'Gear':<8} | {'Author':<15}")
+        print("-" * 70)
+        for t in tones:
+            author = (t.get("user") or {}).get("username", "Unknown")
+            print(f"{t.get('id', ''):<10} | {t.get('title', '')[:30]:<30} | {t.get('gear', ''):<8} | {author[:15]:<15}")
+    elif action == "models":
+        tone_id = args.tone_id
+        if tone_id is None and args.query and args.query.isdigit():
+            tone_id = int(args.query)
+        if tone_id is None:
+            print("[ERROR] Please provide a valid Tone ID (e.g. 'headrush_cli cloud models 2599')")
+            return
+        print(f"\n📦 Fetching models for Tone ID {tone_id}...")
+        models = hm.cloud_get_tone_models(tone_id)
+        print(f"Total captures available: {len(models)}\n")
+        print(f"{'Model ID':<10} | {'Capture Name':<35} | {'Size/Arch':<15}")
+        print("-" * 65)
+        for m in models:
+            print(f"{m.get('id', ''):<10} | {m.get('name', '')[:35]:<35} | {m.get('size', 'Standard'):<15}")
+    elif action == "install":
+        tone_id = args.tone_id
+        if tone_id is None and args.query and args.query.isdigit():
+            tone_id = int(args.query)
+        if tone_id is None:
+            print("[ERROR] Please provide a valid Tone ID (e.g. 'headrush_cli cloud install 2599')")
+            return
+        print(f"\n⚡ Installing Model from TONE3000 Cloud (Tone ID: {tone_id})...")
+        models = hm.cloud_get_tone_models(tone_id)
+        if not models:
+            print(f"[ERROR] No models found for Tone ID {tone_id}")
+            return
+        target = None
+        if getattr(args, "model_name", None):
+            for m in models:
+                if args.model_name.lower() in m.get("name", "").lower():
+                    target = m
+                    break
+        if not target:
+            target = models[0]
+            
+        print(f"Downloading '{target.get('name')}'...")
+        res = hm.cloud_download_and_install(
+            model_obj=target,
+            slot=args.slot,
+            custom_name=args.name or target.get("name"),
+            tone=args.tone,
+            level=args.level
+        )
+        print(f"\n[OK] Successfully installed cloud model to slot {res['slot']:03d}!")
+        print(f"  Preset Name: {res['preset_name']}")
+        print(f"  Tone File:   {res['nam_file']}")
+        print(f"  Arch:        {res.get('cloud_info', {}).get('architecture', 'WaveNet')}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="HeadRush MX5 NAM & IR Manager Pro")
     subparsers = parser.add_subparsers(dest="command", help="Sub-commands")
@@ -315,6 +391,19 @@ def main():
     
     # backup
     subparsers.add_parser("backup", help="Backup existing NAM models and presets from MX5")
+
+    # cloud (TONE3000)
+    p_cloud = subparsers.add_parser("cloud", help="Browse, search, and install community tones from TONE3000 Cloud")
+    p_cloud.add_argument("cloud_action", choices=["search", "trending", "latest", "models", "install"], help="Action to perform")
+    p_cloud.add_argument("query", nargs="?", default="", help="Search query (e.g. 'Mesa', 'Klon', 'Friedman')")
+    p_cloud.add_argument("--gear", choices=["amp", "pedal", "cab", "full_rig"], default=None, help="Filter by gear type")
+    p_cloud.add_argument("--page", type=int, default=1, help="Results page number")
+    p_cloud.add_argument("--tone-id", type=int, default=None, help="TONE3000 Tone ID")
+    p_cloud.add_argument("--model-name", type=str, default=None, help="Name filter for model inside tone")
+    p_cloud.add_argument("--slot", type=int, default=None, help="Destination HeadRush slot (0-100)")
+    p_cloud.add_argument("--name", type=str, default=None, help="Custom preset name")
+    p_cloud.add_argument("--tone", type=int, default=50, help="Input Trim (0-100)")
+    p_cloud.add_argument("--level", type=int, default=70, help="Output Trim (0-100)")
     
     args = parser.parse_args()
     if args.command == "list" or not args.command:
@@ -345,6 +434,8 @@ def main():
         cmd_irs(args)
     elif args.command == "backup":
         cmd_backup(args)
+    elif args.command == "cloud":
+        cmd_cloud(args)
 
 if __name__ == "__main__":
     main()
