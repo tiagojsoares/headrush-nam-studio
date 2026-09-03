@@ -422,7 +422,7 @@ class HeadRushApp(ctk.CTk):
         )
         ent_pix.pack(side="left", fill="x", expand=True, padx=(0, 8))
         
-        default_pix = "tiago.guitar.dev@gmail.com"
+        default_pix = "tiagojsoares7@gmail.com"
         ent_pix.insert(0, default_pix)
 
         def _copy_pix():
