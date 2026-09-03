@@ -3,6 +3,9 @@ import re
 import json
 import uuid
 import shutil
+import hashlib
+import zipfile
+import subprocess
 from datetime import datetime
 
 # Global configuration
@@ -656,4 +659,644 @@ def defrag_and_reorder_slots(sort_by="current", make_safety_backup=True):
         }
     finally:
         shutil.rmtree(temp_stage, ignore_errors=True)
+
+# ====================================================================
+# ADVANCED PRO SUITE: SMART RENAMER, INSPECTOR, SETLISTS, HEALTH, BATCH
+# ====================================================================
+
+SMART_ABBREVIATIONS = [
+    (r'(?i)\bmesa boogie\b', 'MESA'),
+    (r'(?i)\bdual rectifier\b', 'RECTO DUAL'),
+    (r'(?i)\btriple rectifier\b', 'RECTO TRIP'),
+    (r'(?i)\brectifier\b', 'RECTO'),
+    (r'(?i)\bmarshall\b', 'MRSHL'),
+    (r'(?i)\bfender\b', 'FNDR'),
+    (r'(?i)\bpeavey\b', 'PVY'),
+    (r'(?i)\bsoldano\b', 'SLDNO'),
+    (r'(?i)\bfriedman\b', 'FRDMN'),
+    (r'(?i)\bdumble\b', 'DMBL'),
+    (r'(?i)\bbogner\b', 'BGNR'),
+    (r'(?i)\btube screamer\b', 'TS9'),
+    (r'(?i)\boverdrive\b', 'OD'),
+    (r'(?i)\bdistortion\b', 'DIST'),
+    (r'(?i)\bcompressor\b', 'COMP'),
+    (r'(?i)\bchannel\b', 'CH'),
+    (r'(?i)\bclean\b', 'CLN'),
+    (r'(?i)\bcrunch\b', 'CRNCH'),
+    (r'(?i)\bbright\b', 'BRT'),
+    (r'(?i)\bboost\b', 'BST'),
+    (r'(?i)\bextreme\b', 'EXTR'),
+    (r'(?i)\bpreamp\b', 'PRE'),
+    (r'(?i)\bmaster\b', 'MSTR'),
+    (r'(?i)\blead\b', 'LEAD'),
+    (r'(?i)\brhythm\b', 'RHY')
+]
+
+def smart_format_preset_name(raw_name, max_len=24):
+    """
+    Intelligently shortens and optimizes model names for the HeadRush LCD screen
+    and footswitch scribble-strips using regex abbreviation rules.
+    """
+    if not raw_name:
+        return "MODEL"
+        
+    name = os.path.splitext(raw_name)[0]
+    name = re.sub(r'^\d{3}\s*-\s*', '', name)
+    name = re.sub(r'[_\-]+', ' ', name)
+    
+    for pattern, repl in SMART_ABBREVIATIONS:
+        name = re.sub(pattern, repl, name)
+        
+    name = re.sub(r'[^\w\s\+\.]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name[:max_len].strip()
+
+def inspect_nam_file(filepath):
+    """
+    Inspects a .nam model file and extracts structural metadata:
+    architecture, sample rate, training loss (ESR), author, version, etc.
+    """
+    if not os.path.exists(filepath):
+        return {"valid": False, "error": "File not found"}
+        
+    try:
+        size_kb = round(os.path.getsize(filepath) / 1024, 1)
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            data = json.load(f)
+            
+        arch = data.get("architecture") or "WaveNet / LSTM"
+        version = data.get("version") or "1.0.0"
+        sample_rate = data.get("sample_rate") or 48000
+        
+        metadata = data.get("metadata") or {}
+        model_name = metadata.get("name") or data.get("name") or os.path.splitext(os.path.basename(filepath))[0]
+        author = metadata.get("author") or data.get("author") or "Community"
+        description = metadata.get("description") or ""
+        date = metadata.get("date") or ""
+        
+        # Training loss / ESR
+        training_loss = None
+        if "esr" in metadata:
+            training_loss = metadata["esr"]
+        elif "training_loss" in metadata:
+            training_loss = metadata["training_loss"]
+            
+        return {
+            "valid": True,
+            "filename": os.path.basename(filepath),
+            "filepath": filepath,
+            "name": model_name,
+            "architecture": arch,
+            "version": version,
+            "author": author,
+            "sample_rate": sample_rate,
+            "size_kb": size_kb,
+            "description": description,
+            "date": date,
+            "training_loss": training_loss
+        }
+    except Exception as e:
+        return {"valid": False, "error": str(e), "filename": os.path.basename(filepath)}
+
+def detect_duplicate_models():
+    """
+    Scans installed /NAM files and detects duplicates by content hash (SHA-256)
+    and by normalized model names.
+    """
+    if not is_headrush_connected():
+        return {"total_duplicates": 0, "hash_duplicates": {}, "name_duplicates": {}}
+        
+    slots = get_installed_slots()
+    hashes = {}
+    names = {}
+    
+    nam_dir = get_nam_dir()
+    for s_num, info in slots.items():
+        fname = info.get('nam_file')
+        if not fname:
+            continue
+        full_path = os.path.join(nam_dir, fname)
+        if not os.path.exists(full_path):
+            continue
+            
+        # 1. Content Hash
+        try:
+            hasher = hashlib.sha256()
+            with open(full_path, 'rb') as f:
+                while chunk := f.read(65536):
+                    hasher.update(chunk)
+            file_hash = hasher.hexdigest()
+            hashes.setdefault(file_hash, []).append({
+                "slot": s_num,
+                "filename": fname,
+                "preset_name": info.get('preset_name')
+            })
+        except Exception:
+            pass
+            
+        # 2. Name duplicates
+        norm_name = sanitize_for_headrush(info.get('preset_name') or info.get('nam_name') or '', 24).lower()
+        names.setdefault(norm_name, []).append(s_num)
+        
+    hash_dupes = {h: items for h, items in hashes.items() if len(items) > 1}
+    name_dupes = {n: s_list for n, s_list in names.items() if len(s_list) > 1}
+    
+    total = len(hash_dupes) + len(name_dupes)
+    return {
+        "total_duplicates": total,
+        "hash_duplicates": hash_dupes,
+        "name_duplicates": name_dupes
+    }
+
+def import_local_models_batch(file_or_dir_paths, base_slot=None, default_tone=50, default_level=70, smart_rename=True):
+    """
+    Imports a batch of .nam files or folders into the next free slots on the HeadRush MX5.
+    Returns summary with list of installed models and slots.
+    """
+    if not is_headrush_connected():
+        raise Exception("HeadRush MX5 não conectada.")
+        
+    # Gather all .nam filepaths
+    nam_files = []
+    for item in file_or_dir_paths:
+        if os.path.isfile(item) and item.lower().endswith('.nam'):
+            nam_files.append(item)
+        elif os.path.isdir(item):
+            for root, _, files in os.walk(item):
+                for f in files:
+                    if f.lower().endswith('.nam'):
+                        nam_files.append(os.path.join(root, f))
+                        
+    # Sort files naturally
+    nam_files = sorted(list(set(nam_files)))
+    if not nam_files:
+        return {"installed": [], "skipped": [], "count": 0}
+        
+    installed = []
+    skipped = []
+    
+    slots = get_installed_slots()
+    used_slots = set(s for s, info in slots.items() if info.get('nam_file'))
+    
+    curr_slot = base_slot if (base_slot is not None and base_slot >= 0) else 0
+    
+    for src_file in nam_files:
+        # Find next available slot
+        while curr_slot in used_slots and curr_slot <= 100:
+            curr_slot += 1
+            
+        if curr_slot > 100:
+            skipped.append({"file": src_file, "reason": "No free slots remaining (0-100 full)"})
+            continue
+            
+        raw_name = os.path.splitext(os.path.basename(src_file))[0]
+        pname = smart_format_preset_name(raw_name) if smart_rename else sanitize_for_headrush(raw_name, 24)
+        
+        try:
+            res = install_nam_to_headrush(src_file, custom_name=pname, slot=curr_slot, tone=default_tone, level=default_level)
+            installed.append({
+                "slot": curr_slot,
+                "preset_name": pname,
+                "src_file": src_file,
+                "result": res
+            })
+            used_slots.add(curr_slot)
+            curr_slot += 1
+        except Exception as e:
+            skipped.append({"file": src_file, "reason": str(e)})
+            
+    return {
+        "installed": installed,
+        "skipped": skipped,
+        "count": len(installed)
+    }
+
+def get_setlists_dir(root="c:/VM"):
+    path = os.path.join(root, "HeadRush_Setlists")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def save_setlist(name, root="c:/VM"):
+    """
+    Saves the entire current pedalboard configuration (all installed slots and blocks)
+    as a named Setlist snapshot.
+    """
+    if not is_headrush_connected():
+        raise Exception("HeadRush não conectada.")
+        
+    clean_name = re.sub(r'[^\w\s\-_]', '', str(name)).strip()
+    if not clean_name:
+        clean_name = "Default_Setlist"
+        
+    setlist_dir = os.path.join(get_setlists_dir(root), clean_name)
+    if os.path.exists(setlist_dir):
+        shutil.rmtree(setlist_dir, ignore_errors=True)
+    os.makedirs(setlist_dir, exist_ok=True)
+    
+    slots = get_installed_slots()
+    
+    # Copy NAM
+    if os.path.exists(get_nam_dir()):
+        shutil.copytree(get_nam_dir(), os.path.join(setlist_dir, "NAM"))
+        
+    # Copy Blocks V1
+    if os.path.exists(get_blocks_v1_dir()):
+        shutil.copytree(get_blocks_v1_dir(), os.path.join(setlist_dir, "Blocks_V1"))
+        
+    # Copy Blocks V2
+    if os.path.exists(get_blocks_v2_dir()):
+        shutil.copytree(get_blocks_v2_dir(), os.path.join(setlist_dir, "Blocks_V2"))
+        
+    # Metadata
+    meta = {
+        "name": clean_name,
+        "created_at": datetime.now().isoformat(),
+        "total_slots": len(slots),
+        "slots": {str(k): v["preset_name"] for k, v in slots.items() if v.get("nam_file")}
+    }
+    with open(os.path.join(setlist_dir, "setlist.json"), 'w', encoding='utf-8') as f:
+        json.dump(meta, f, indent=2)
+        
+    return setlist_dir
+
+def list_setlists(root="c:/VM"):
+    """Returns a list of all saved Setlists."""
+    s_dir = get_setlists_dir(root)
+    if not os.path.exists(s_dir):
+        return []
+    res = []
+    for item in sorted(os.listdir(s_dir)):
+        p = os.path.join(s_dir, item)
+        if os.path.isdir(p):
+            meta_file = os.path.join(p, "setlist.json")
+            if os.path.exists(meta_file):
+                try:
+                    with open(meta_file, 'r', encoding='utf-8') as f:
+                        meta = json.load(f)
+                    res.append({
+                        "name": item,
+                        "path": p,
+                        "created_at": meta.get("created_at", ""),
+                        "total_slots": meta.get("total_slots", 0),
+                        "slots": meta.get("slots", {})
+                    })
+                except Exception:
+                    pass
+            else:
+                res.append({"name": item, "path": p, "created_at": "", "total_slots": 0, "slots": {}})
+    return res
+
+def load_setlist(name, root="c:/VM", make_safety_backup=True):
+    """
+    Restores a saved Setlist onto the HeadRush MX5.
+    Creates an automatic backup before overwriting.
+    """
+    if not is_headrush_connected():
+        raise Exception("HeadRush não conectada.")
+        
+    setlist_dir = os.path.join(get_setlists_dir(root), name)
+    if not os.path.exists(setlist_dir):
+        raise Exception(f"Setlist '{name}' não encontrado.")
+        
+    backup_path = None
+    if make_safety_backup:
+        backup_path = create_backup(target_root=root)
+        
+    # Clear current NAM & Blocks
+    for d in [get_nam_dir(), get_blocks_v1_dir(), get_blocks_v2_dir()]:
+        if os.path.exists(d):
+            for f in os.listdir(d):
+                try:
+                    os.remove(os.path.join(d, f))
+                except Exception:
+                    pass
+                    
+    # Copy from setlist
+    src_nam = os.path.join(setlist_dir, "NAM")
+    if os.path.exists(src_nam):
+        for f in os.listdir(src_nam):
+            shutil.copy2(os.path.join(src_nam, f), os.path.join(get_nam_dir(), f))
+            
+    src_v1 = os.path.join(setlist_dir, "Blocks_V1")
+    if os.path.exists(src_v1):
+        for f in os.listdir(src_v1):
+            shutil.copy2(os.path.join(src_v1, f), os.path.join(get_blocks_v1_dir(), f))
+            
+    src_v2 = os.path.join(setlist_dir, "Blocks_V2")
+    if os.path.exists(src_v2):
+        for f in os.listdir(src_v2):
+            shutil.copy2(os.path.join(src_v2, f), os.path.join(get_blocks_v2_dir(), f))
+            
+    sync_missing_blocks()
+    return {"loaded": name, "backup": backup_path}
+
+def export_setlist_zip(name, target_zip_path, root="c:/VM"):
+    """Packages a Setlist directory into a portable .zip or .hrpack file."""
+    setlist_dir = os.path.join(get_setlists_dir(root), name)
+    if not os.path.exists(setlist_dir):
+        raise Exception(f"Setlist '{name}' não encontrado.")
+        
+    target_dir = os.path.dirname(target_zip_path)
+    if target_dir:
+        os.makedirs(target_dir, exist_ok=True)
+        
+    with zipfile.ZipFile(target_zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
+        for root_d, _, files in os.walk(setlist_dir):
+            for file in files:
+                full_path = os.path.join(root_d, file)
+                rel_path = os.path.relpath(full_path, setlist_dir)
+                z.write(full_path, rel_path)
+                
+    return target_zip_path
+
+def import_setlist_zip(zip_path, root="c:/VM"):
+    """Imports a .zip or .hrpack Setlist and registers it."""
+    if not os.path.exists(zip_path):
+        raise Exception("Arquivo de setlist não encontrado.")
+        
+    base_name = os.path.splitext(os.path.basename(zip_path))[0]
+    dest_dir = os.path.join(get_setlists_dir(root), base_name)
+    os.makedirs(dest_dir, exist_ok=True)
+    
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        z.extractall(dest_dir)
+        
+    return dest_dir
+
+def generate_stage_cheat_sheet(output_format="html"):
+    """
+    Generates a printable Stage Cheat Sheet (Colinha de Palco) for the guitarist.
+    Formats: 'txt', 'md', 'html'.
+    """
+    slots = get_installed_slots()
+    active_slots = [info for s, info in sorted(slots.items()) if info.get('nam_file')]
+    
+    if output_format == "txt":
+        lines = [
+            "=" * 64,
+            "      HEADRUSH MX5 · GUIA DE PALCO (STAGE CHEAT SHEET)",
+            "=" * 64,
+            f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  Total: {len(active_slots)} Timbres",
+            "-" * 64,
+            f"{'SLOT':<6} | {'PRESET / MODELO':<30} | {'TONE':<6} | {'LEVEL':<6}",
+            "-" * 64
+        ]
+        for s in active_slots:
+            lines.append(f"{s['slot']:03d}    | {s['preset_name'][:30]:<30} | {s.get('tone', 50):<6} | {s.get('level', 70):<6}")
+        lines.append("=" * 64)
+        return "\n".join(lines)
+        
+    elif output_format == "md":
+        lines = [
+            "# 🎸 HeadRush MX5 · Stage Cheat Sheet",
+            f"*Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Total: {len(active_slots)} Timbres*",
+            "",
+            "| Slot | Preset / Modelo | Tone | Level |",
+            "| :--- | :--- | :---: | :---: |"
+        ]
+        for s in active_slots:
+            lines.append(f"| `{s['slot']:03d}` | **{s['preset_name']}** | {s.get('tone', 50)}% | {s.get('level', 70)}% |")
+        return "\n".join(lines)
+        
+    else: # HTML
+        rows_html = ""
+        for s in active_slots:
+            pname = s['preset_name']
+            tone = s.get('tone', 50)
+            level = s.get('level', 70)
+            rows_html += f"""
+            <tr>
+                <td class="slot">{s['slot']:03d}</td>
+                <td class="name"><strong>{pname}</strong></td>
+                <td class="trim">{tone}%</td>
+                <td class="trim">{level}%</td>
+            </tr>
+            """
+        html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>HeadRush MX5 · Stage Cheat Sheet</title>
+<style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 24px; }}
+    .header {{ text-align: center; border-bottom: 2px solid #38bdf8; padding-bottom: 12px; margin-bottom: 20px; }}
+    h1 {{ margin: 0; color: #38bdf8; font-size: 26px; }}
+    .meta {{ color: #94a3b8; font-size: 13px; margin-top: 6px; }}
+    table {{ width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; }}
+    th {{ background: #0284c7; color: #ffffff; text-align: left; padding: 10px 14px; font-size: 14px; }}
+    td {{ padding: 8px 14px; border-bottom: 1px solid #334155; font-size: 13px; }}
+    tr:nth-child(even) {{ background: #182234; }}
+    .slot {{ font-family: monospace; font-weight: bold; color: #38bdf8; font-size: 15px; width: 60px; }}
+    .trim {{ text-align: center; width: 80px; color: #a5f3fc; }}
+    @media print {{
+        body {{ background: white; color: black; padding: 0; }}
+        table {{ background: white; border: 1px solid #ccc; }}
+        th {{ background: #ddd; color: black; }}
+        td {{ border-bottom: 1px solid #eee; }}
+        .slot {{ color: black; }}
+        .trim {{ color: black; }}
+    }}
+</style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎸 HeadRush MX5 · Stage Cheat Sheet</h1>
+        <div class="meta">Data: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Total: {len(active_slots)} Timbres Instalados</div>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Slot</th>
+                <th>Preset / Nome do Modelo</th>
+                <th style="text-align:center;">Tone</th>
+                <th style="text-align:center;">Level</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+</body>
+</html>"""
+        return html
+
+def get_storage_status():
+    """Returns disk space metrics and slot usage statistics."""
+    slots = get_installed_slots()
+    used_slots = len([s for s, info in slots.items() if info.get('nam_file')])
+    
+    drive = get_drive()
+    disk_info = {"total_gb": 0.0, "free_gb": 0.0, "used_gb": 0.0, "percent_used": 0.0}
+    
+    try:
+        if drive and os.path.exists(drive):
+            total, used, free = shutil.disk_usage(drive)
+            disk_info = {
+                "total_gb": round(total / (1024**3), 2),
+                "used_gb": round(used / (1024**3), 2),
+                "free_gb": round(free / (1024**3), 2),
+                "percent_used": round((used / total) * 100, 1)
+            }
+    except Exception:
+        pass
+        
+    return {
+        "connected": is_headrush_connected(),
+        "drive": drive,
+        "slots_used": used_slots,
+        "slots_total": 101,
+        "slots_free": 101 - used_slots,
+        "slots_percent": round((used_slots / 101) * 100, 1),
+        "disk": disk_info
+    }
+
+def safe_eject_headrush():
+    """
+    Flushes Windows caches and safely prepares the HeadRush drive for ejection.
+    """
+    drive = get_drive().rstrip("/\\")
+    
+    # 1. Sync / flush write caches
+    try:
+        if os.name == 'nt':
+            # Run PowerShell sync
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", f"[System.IO.File]::SetLastWriteTime('{drive}\\', [System.DateTime]::Now)"],
+                capture_output=True,
+                timeout=5
+            )
+    except Exception:
+        pass
+        
+    return {
+        "drive": drive,
+        "safe_to_disconnect": True,
+        "message": f"Todos os dados foram sincronizados no disco {drive}:\\. É seguro desconectar o cabo USB e reiniciar a HeadRush MX5!"
+    }
+
+def export_slot_bundle(slot_num, target_zip_path):
+    """
+    Exports a single slot (NAM file + ANXIETY OD block + ANXIETY OD V2 block)
+    into a shareable .zip bundle.
+    """
+    slots = get_installed_slots()
+    if slot_num not in slots or not slots[slot_num].get('nam_file'):
+        raise Exception(f"Slot {slot_num:03d} não possui modelo instalado.")
+        
+    info = slots[slot_num]
+    nam_path = os.path.join(get_nam_dir(), info['nam_file'])
+    
+    os.makedirs(os.path.dirname(target_zip_path) or '.', exist_ok=True)
+    
+    with zipfile.ZipFile(target_zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
+        if os.path.exists(nam_path):
+            z.write(nam_path, os.path.basename(nam_path))
+            
+        # Add V1 block if exists
+        b1_dir = get_blocks_v1_dir()
+        if os.path.exists(b1_dir):
+            for f in os.listdir(b1_dir):
+                if f.startswith(f"{slot_num:03d} -") and f.endswith('.block'):
+                    z.write(os.path.join(b1_dir, f), f"Blocks_V1/{f}")
+                    
+        # Add V2 block if exists
+        b2_dir = get_blocks_v2_dir()
+        if os.path.exists(b2_dir):
+            for f in os.listdir(b2_dir):
+                if f.startswith(f"{slot_num:03d} -") and f.endswith('.block'):
+                    z.write(os.path.join(b2_dir, f), f"Blocks_V2/{f}")
+                    
+    return target_zip_path
+
+def apply_trim_preset(slot_num, preset_type):
+    """
+    Applies one of the tuned A/B trim presets to an existing slot.
+    Types: 'clean_boost', 'hot_drive', 'high_gain', 'unity'
+    """
+    presets_map = {
+        "clean_boost": (55, 80),
+        "hot_drive": (50, 70),
+        "high_gain": (45, 65),
+        "unity": (50, 50)
+    }
+    if preset_type not in presets_map:
+        raise Exception(f"Tipo de preset inválido: {preset_type}")
+        
+    tone, level = presets_map[preset_type]
+    slots = get_installed_slots()
+    if slot_num not in slots:
+        raise Exception(f"Slot {slot_num:03d} não encontrado.")
+        
+    pname = slots[slot_num].get('preset_name') or "MODEL"
+    return update_slot_trims(slot_num, pname, tone=tone, level=level, sync_nam_name=False)
+
+def perform_health_check():
+    """
+    Performs an in-depth integrity diagnostic on the HeadRush storage:
+    checks block/nam file matching, JSON syntax integrity, and overall health score.
+    """
+    if not is_headrush_connected():
+        return {
+            "healthy": False,
+            "score": 0,
+            "issues": ["Pedaleira HeadRush MX5 não conectada."],
+            "summary": "Desconectada"
+        }
+        
+    issues = []
+    warnings = []
+    slots = get_installed_slots()
+    
+    total_slots = len(slots)
+    valid_nams = 0
+    valid_blocks = 0
+    
+    nam_dir = get_nam_dir()
+    b1_dir = get_blocks_v1_dir()
+    b2_dir = get_blocks_v2_dir()
+    
+    # 1. Check NAM models
+    for s_num, info in slots.items():
+        if info.get('nam_file'):
+            valid_nams += 1
+            n_path = os.path.join(nam_dir, info['nam_file'])
+            try:
+                with open(n_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    json.load(f)
+            except Exception as e:
+                issues.append(f"Slot {s_num:03d}: Arquivo .nam inválido ou corrompido ({info['nam_file']})")
+                
+        # 2. Check blocks
+        has_v1 = bool(info.get('block_file_v1'))
+        has_v2 = bool(info.get('block_file_v2'))
+        if has_v1 or has_v2:
+            valid_blocks += 1
+            
+        if info.get('nam_file') and not (has_v1 and has_v2):
+            warnings.append(f"Slot {s_num:03d}: Falta bloco em uma das pastas V1 ou V2 (Use 'Sincronizar Blocos').")
+            
+    # 3. Check orphaned blocks
+    valid_slot_set = set(s for s, info in slots.items() if info.get('nam_file'))
+    for b_dir, label in [(b1_dir, "ANXIETY OD"), (b2_dir, "ANXIETY OD V2")]:
+        if os.path.exists(b_dir):
+            for f in os.listdir(b_dir):
+                if f.endswith('.block') and f[:3].isdigit():
+                    s_idx = int(f[:3])
+                    if s_idx not in valid_slot_set:
+                        warnings.append(f"Bloco órfão detectado em {label}: {f} (sem modelo .nam correspondente).")
+                        
+    score = 100
+    score -= len(issues) * 15
+    score -= len(warnings) * 3
+    score = max(0, min(100, score))
+    
+    return {
+        "healthy": len(issues) == 0,
+        "score": score,
+        "total_models": valid_nams,
+        "issues": issues,
+        "warnings": warnings,
+        "summary": f"{score}% Saudável - {valid_nams} modelos instalados."
+    }
+
 

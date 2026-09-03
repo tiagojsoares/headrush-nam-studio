@@ -127,8 +127,134 @@ def cmd_backup(args):
         shutil.copytree(hm.get_blocks_v2_dir(), os.path.join(backup_root, "Blocks_ANXIETY_OD_V2"))
     print(f"[OK] Backup created successfully at: {backup_root}")
 
+def cmd_batch(args):
+    if not hm.is_headrush_connected():
+        print("[!] HeadRush MX5 not detected.")
+        return
+    paths = args.paths
+    smart = not args.no_smart
+    print(f"Importing batch of models from {len(paths)} target(s)...")
+    res = hm.import_local_models_batch(paths, smart_rename=smart)
+    print(f"[OK] Installed {res['count']} models to HeadRush MX5.")
+    if res['skipped']:
+        print(f"Skipped {len(res['skipped'])} files:")
+        for sk in res['skipped']:
+            print(f"  - {sk['file']}: {sk['reason']}")
+
+def cmd_organize(args):
+    if not hm.is_headrush_connected():
+        print("[!] HeadRush MX5 not detected.")
+        return
+    print("Running HeadRush Organize Wizard...")
+    cleaned = hm.clean_orphaned_blocks()
+    if cleaned:
+        print(f"[OK] Cleaned {len(cleaned)} orphaned block presets.")
+    sort_by = "alpha" if args.alpha else "current"
+    res = hm.defrag_and_reorder_slots(sort_by=sort_by, make_safety_backup=True)
+    print(f"[OK] Defragmented and reordered {res['count']} slots. Backup saved.")
+
+def cmd_cheatsheet(args):
+    fmt = args.format
+    out = args.output
+    sheet = hm.generate_stage_cheat_sheet(fmt)
+    if out:
+        with open(out, 'w', encoding='utf-8') as f:
+            f.write(sheet)
+        print(f"[OK] Stage cheat sheet saved to: {out}")
+    else:
+        print(sheet)
+
+def cmd_duplicates(args):
+    print("Checking for duplicate models on HeadRush MX5...")
+    dupes = hm.detect_duplicate_models()
+    print(f"Total duplicates detected: {dupes['total_duplicates']}")
+    if dupes['hash_duplicates']:
+        print("\nIdentical Content Duplicates (SHA-256):")
+        for h, items in dupes['hash_duplicates'].items():
+            print(f"  Hash {h[:12]}... -> {len(items)} slots:")
+            for it in items:
+                print(f"    - Slot {it['slot']:03d}: {it['preset_name']} ({it['file']})")
+    if dupes['name_duplicates']:
+        print("\nIdentical Preset Names:")
+        for name, slots in dupes['name_duplicates'].items():
+            print(f"  '{name}' -> Slots: {', '.join(f'{s:03d}' for s in slots)}")
+
+def cmd_inspect(args):
+    path = args.path
+    if not os.path.exists(path):
+        print(f"[!] File not found: {path}")
+        return
+    meta = hm.inspect_nam_file(path)
+    print(f"\n=======================================================")
+    print(f" 🔍 NAM MODEL INSPECTOR: {meta['filename']}")
+    print(f"=======================================================")
+    print(f"Valid NAM Model:  {meta['valid']}")
+    print(f"Architecture:     {meta['architecture']}")
+    print(f"Sample Rate:      {meta['sample_rate']} Hz")
+    print(f"File Size:        {meta['size_kb']} KB")
+    print(f"Author / Creator: {meta['author']}")
+    print(f"Training Loss:    {meta['training_loss']}")
+    print(f"Date:             {meta['date']}")
+    if meta['description']:
+        print(f"Description:      {meta['description']}")
+
+def cmd_health(args):
+    print("Diagnosing HeadRush MX5 health & integrity...")
+    h = hm.perform_health_check()
+    print(f"\n=======================================================")
+    print(f" ❤️ SYSTEM HEALTH SCORE: {h['score']}% ({'HEALTHY' if h['healthy'] else 'ISSUES FOUND'})")
+    print(f"=======================================================")
+    print(f"Summary:        {h['summary']}")
+    print(f"Total Models:   {h['total_models']}")
+    if h['issues']:
+        print("\nCritical Issues:")
+        for iss in h['issues']:
+            print(f"  ❌ {iss}")
+    if h['warnings']:
+        print("\nWarnings:")
+        for w in h['warnings']:
+            print(f"  ⚠️ {w}")
+    if not h['issues'] and not h['warnings']:
+        print("\n✓ Perfect condition! All blocks and models are 100% in sync.")
+
+def cmd_storage(args):
+    st = hm.get_storage_status()
+    print(f"\n=======================================================")
+    print(f" 💾 STORAGE & CAPACITY STATUS · DRIVE {st['drive']}")
+    print(f"=======================================================")
+    print(f"Connected:      {st['connected']}")
+    print(f"Slots Used:     {st['slots_used']} / {st['slots_total']} ({st['slots_percent']}%)")
+    print(f"Slots Free:     {st['slots_free']}")
+    print(f"Disk Total:     {st['disk']['total_gb']} GB")
+    print(f"Disk Free:      {st['disk']['free_gb']} GB (Used: {st['disk']['percent_used']}%)")
+
+def cmd_eject(args):
+    res = hm.safe_eject_headrush()
+    print(f"\n⏏️ {res['message']}")
+    print("It is now safe to disconnect your HeadRush MX5 USB cable.")
+
+def cmd_setlist(args):
+    sub = args.setlist_action
+    if sub == "list" or not sub:
+        lists = hm.list_setlists()
+        print(f"\nSaved Setlists ({len(lists)} found):")
+        for s in lists:
+            print(f"  🗂️  {s['name']:<24} ({s['total_slots']} slots) - Created: {s['created_at'][:10]}")
+    elif sub == "save":
+        s_dir = hm.save_setlist(args.name)
+        print(f"[OK] Setlist '{args.name}' saved to: {s_dir}")
+    elif sub == "load":
+        res = hm.load_setlist(args.name)
+        print(f"[OK] Setlist '{args.name}' loaded to HeadRush MX5 ({res['restored_models']} models).")
+    elif sub == "export":
+        hm.export_setlist_zip(args.name, args.target)
+        print(f"[OK] Setlist '{args.name}' exported to: {args.target}")
+    elif sub == "import":
+        dest = hm.import_setlist_zip(args.source)
+        print(f"[OK] Setlist imported successfully from: {args.source}")
+
 def main():
-    parser = argparse.ArgumentParser(description="HeadRush MX5 NAM & IR Manager")
+    parser = argparse.ArgumentParser(description="HeadRush MX5 NAM & IR Manager Pro")
     subparsers = parser.add_subparsers(dest="command", help="Sub-commands")
     
     # list
@@ -142,6 +268,43 @@ def main():
     p_inst.add_argument("--tone", type=int, default=50, help="Input Trim (0-100, default 50)")
     p_inst.add_argument("--level", type=int, default=70, help="Output Trim (0-100, default 70)")
     
+    # batch
+    p_batch = subparsers.add_parser("batch", help="Batch install NAM models from folder or files")
+    p_batch.add_argument("paths", nargs="+", help="Paths to folders or .nam files")
+    p_batch.add_argument("--no-smart", action="store_true", help="Disable automatic LCD name shortening")
+
+    # organize
+    p_org = subparsers.add_parser("organize", help="Defragment and reorder slots")
+    p_org.add_argument("--alpha", action="store_true", help="Sort alphabetically instead of current order")
+
+    # cheatsheet
+    p_sheet = subparsers.add_parser("cheatsheet", help="Generate stage cheat sheet")
+    p_sheet.add_argument("--format", choices=["txt", "md", "html"], default="txt", help="Output format")
+    p_sheet.add_argument("--output", "-o", default=None, help="Output file path")
+
+    # duplicates
+    subparsers.add_parser("duplicates", help="Check for duplicate models and names")
+
+    # inspect
+    p_insp = subparsers.add_parser("inspect", help="Inspect metadata of a .nam file")
+    p_insp.add_argument("path", help="Path to .nam file")
+
+    # health
+    subparsers.add_parser("health", help="Check system health and block integrity")
+
+    # storage
+    subparsers.add_parser("storage", help="Check storage and slot usage")
+
+    # eject
+    subparsers.add_parser("eject", help="Flush writes and safely eject USB")
+
+    # setlist
+    p_setlist = subparsers.add_parser("setlist", help="Manage setlists and profiles")
+    p_setlist.add_argument("setlist_action", choices=["list", "save", "load", "export", "import"], nargs="?", default="list")
+    p_setlist.add_argument("--name", default="Default_Setlist", help="Setlist name")
+    p_setlist.add_argument("--target", default="Setlist.hrpack", help="Target path for export")
+    p_setlist.add_argument("--source", default=None, help="Source zip path for import")
+
     # search
     p_search = subparsers.add_parser("search", help="Search 97k library for models")
     p_search.add_argument("query", help="Search keyword (e.g. 5150, Bogner, Klon)")
@@ -158,6 +321,24 @@ def main():
         cmd_list(args)
     elif args.command == "install":
         cmd_install(args)
+    elif args.command == "batch":
+        cmd_batch(args)
+    elif args.command == "organize":
+        cmd_organize(args)
+    elif args.command == "cheatsheet":
+        cmd_cheatsheet(args)
+    elif args.command == "duplicates":
+        cmd_duplicates(args)
+    elif args.command == "inspect":
+        cmd_inspect(args)
+    elif args.command == "health":
+        cmd_health(args)
+    elif args.command == "storage":
+        cmd_storage(args)
+    elif args.command == "eject":
+        cmd_eject(args)
+    elif args.command == "setlist":
+        cmd_setlist(args)
     elif args.command == "search":
         cmd_search(args)
     elif args.command == "irs":

@@ -215,4 +215,126 @@ def test_clean_orphaned_blocks_and_defrag(tmp_path):
     finally:
         hm.set_drive(orig_drive)
 
+def test_smart_format_preset_name():
+    assert hm.smart_format_preset_name("Mesa_Boogie_Dual_Rectifier_Solo_Head_Ch3") == "MESA RECTO DUAL Solo Head"[:24].strip()
+    assert "MESA" in hm.smart_format_preset_name("Mesa Boogie Mark V")
+    assert "MRSHL" in hm.smart_format_preset_name("Marshall JCM800 Lead")
+    assert "TS9" in hm.smart_format_preset_name("Ibanez Tube Screamer Overdrive")
+    assert "DMBL" in hm.smart_format_preset_name("Dumble ODS Clean")
+    assert len(hm.smart_format_preset_name("A" * 50)) <= 24
+
+def test_inspect_nam_file(tmp_path):
+    # Non-existent file
+    res = hm.inspect_nam_file(str(tmp_path / "fake.nam"))
+    assert res["valid"] is False
+
+    # Valid NAM JSON
+    valid_nam = tmp_path / "test_model.nam"
+    sample_data = {
+        "version": "0.5.1",
+        "architecture": "Standard (WaveNet)",
+        "sample_rate": 48000,
+        "metadata": {
+            "name": "Custom 5150",
+            "author": "NAM Studio",
+            "description": "High gain 5150 head",
+            "esr": 0.012
+        }
+    }
+    valid_nam.write_text(json.dumps(sample_data), encoding='utf-8')
+    res = hm.inspect_nam_file(str(valid_nam))
+    assert res["valid"] is True
+    assert res["name"] == "Custom 5150"
+    assert res["architecture"] == "Standard (WaveNet)"
+    assert res["author"] == "NAM Studio"
+    assert res["training_loss"] == 0.012
+
+def test_batch_import_and_duplicates(tmp_path):
+    orig_drive = hm.get_drive()
+    try:
+        mock_drive = tmp_path / "hr_drive"
+        os.makedirs(mock_drive / "NAM", exist_ok=True)
+        os.makedirs(mock_drive / "Blocks" / "ANXIETY OD", exist_ok=True)
+        os.makedirs(mock_drive / "Blocks" / "ANXIETY OD V2", exist_ok=True)
+        hm.set_drive(str(mock_drive))
+
+        # Create 3 source files
+        src_dir = tmp_path / "src_batch"
+        os.makedirs(src_dir, exist_ok=True)
+        (src_dir / "01_Friedman_BE100.nam").write_text("{\"model\": 1}", encoding='utf-8')
+        (src_dir / "02_Soldano_SLO100.nam").write_text("{\"model\": 2}", encoding='utf-8')
+        # Duplicate of Friedman
+        (src_dir / "03_Friedman_Duplicate.nam").write_text("{\"model\": 1}", encoding='utf-8')
+
+        batch_res = hm.import_local_models_batch([str(src_dir)], smart_rename=True)
+        assert batch_res["count"] == 3
+        
+        # Check duplicate detector
+        dupes = hm.detect_duplicate_models()
+        assert dupes["total_duplicates"] >= 1
+        assert len(dupes["hash_duplicates"]) == 1
+    finally:
+        hm.set_drive(orig_drive)
+
+def test_setlists_and_cheat_sheet(tmp_path):
+    orig_drive = hm.get_drive()
+    try:
+        mock_drive = tmp_path / "hr_drive"
+        os.makedirs(mock_drive / "NAM", exist_ok=True)
+        os.makedirs(mock_drive / "Blocks" / "ANXIETY OD", exist_ok=True)
+        os.makedirs(mock_drive / "Blocks" / "ANXIETY OD V2", exist_ok=True)
+        hm.set_drive(str(mock_drive))
+
+        # Install a model
+        f = tmp_path / "amp.nam"
+        f.write_text("{}", encoding='utf-8')
+        hm.install_nam_to_headrush(str(f), custom_name="Stage Lead", slot=0, tone=55, level=75)
+
+        # Save Setlist
+        s_dir = hm.save_setlist("Rock_Gig", root=str(tmp_path / "setlists"))
+        assert os.path.exists(s_dir)
+        
+        lists = hm.list_setlists(root=str(tmp_path / "setlists"))
+        assert len(lists) == 1
+        assert lists[0]["name"] == "Rock_Gig"
+
+        # Export and Import Setlist Zip
+        zip_p = str(tmp_path / "export_setlist.zip")
+        hm.export_setlist_zip("Rock_Gig", zip_p, root=str(tmp_path / "setlists"))
+        assert os.path.exists(zip_p)
+
+        # Cheat sheet test
+        txt_sheet = hm.generate_stage_cheat_sheet(output_format="txt")
+        assert "Stage Lead" in txt_sheet
+        assert "000" in txt_sheet
+
+        md_sheet = hm.generate_stage_cheat_sheet(output_format="md")
+        assert "| `000` |" in md_sheet
+
+        html_sheet = hm.generate_stage_cheat_sheet(output_format="html")
+        assert "Stage Lead" in html_sheet
+        assert "<table" in html_sheet
+
+        # Storage status
+        status = hm.get_storage_status()
+        assert status["slots_used"] == 1
+
+        # Health check
+        health = hm.perform_health_check()
+        assert health["score"] >= 80
+
+        # Export slot bundle
+        bundle_p = str(tmp_path / "slot0_bundle.zip")
+        hm.export_slot_bundle(0, bundle_p)
+        assert os.path.exists(bundle_p)
+
+        # Apply trim preset
+        hm.apply_trim_preset(0, "clean_boost")
+        slots = hm.get_installed_slots()
+        assert slots[0]["tone"] == 55
+        assert slots[0]["level"] == 80
+    finally:
+        hm.set_drive(orig_drive)
+
+
 

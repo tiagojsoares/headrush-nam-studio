@@ -66,3 +66,44 @@ def test_backend_ir_block_creation(tmp_path):
     with open(ir_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
         assert data["type"] == "IR"
+
+def test_backend_pro_methods(tmp_path):
+    mock_drive = str(tmp_path / "hr_usb")
+    backend = HeadRushBackend(drive=mock_drive)
+    os.makedirs(os.path.join(mock_drive, "NAM"), exist_ok=True)
+    os.makedirs(os.path.join(mock_drive, "Blocks", "ANXIETY OD"), exist_ok=True)
+    os.makedirs(os.path.join(mock_drive, "Blocks", "ANXIETY OD V2"), exist_ok=True)
+    
+    # Test smart formatting
+    formatted = backend.smart_format_preset_name("Mesa_Boogie_Mark_V_Lead")
+    assert "MESA" in formatted
+    
+    # Test batch import
+    src_dir = tmp_path / "models"
+    os.makedirs(src_dir, exist_ok=True)
+    (src_dir / "Amp1.nam").write_text("{\"model\": 1}", encoding='utf-8')
+    (src_dir / "Amp2.nam").write_text("{\"model\": 2}", encoding='utf-8')
+    
+    res = backend.import_local_models_batch([str(src_dir)])
+    assert res["count"] == 2
+    
+    # Storage status
+    st = backend.get_storage_status()
+    assert st["slots_used"] == 2
+    
+    # Health check
+    hc = backend.perform_health_check()
+    assert hc["healthy"] is True
+    
+    # Safe eject
+    ej = backend.safe_eject()
+    assert ej["safe_to_disconnect"] is True
+    
+    # Cheat sheet
+    cs = backend.generate_stage_cheat_sheet("txt")
+    assert "Amp1" in cs or "Amp2" in cs
+    
+    # Duplicates
+    dups = backend.detect_duplicate_models()
+    assert "total_duplicates" in dups
+
